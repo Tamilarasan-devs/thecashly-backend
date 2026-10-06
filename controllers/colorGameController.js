@@ -34,7 +34,7 @@ const getCurrentRound = async (req, res, next) => {
         roundId,
         serverTime: now.getTime(),
         remainingSeconds,
-        demoBalance: user.demoBalance,
+        walletBalance: user.walletBalance / 100,
         pendingPredictions
       }
     });
@@ -73,12 +73,12 @@ const submitPrediction = async (req, res, next) => {
     
     // Check user balance
     const user = await User.findById(req.user.id);
-    if (user.demoBalance < points) {
-      return res.status(400).json({ success: false, message: 'Insufficient demo points.' });
+    if (user.walletBalance < points * 100) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance.' });
     }
 
     // Deduct points
-    user.demoBalance -= points;
+    user.walletBalance -= points * 100;
     await user.save();
 
     // Create prediction
@@ -98,7 +98,7 @@ const submitPrediction = async (req, res, next) => {
       // If duplicate prediction
       if (err.code === 11000) {
         // Refund
-        user.demoBalance += points;
+        user.walletBalance += points * 100;
         await user.save();
         return res.status(400).json({ success: false, message: 'You have already placed a prediction for this round.' });
       }

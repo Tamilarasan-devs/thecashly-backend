@@ -55,14 +55,13 @@ const settleGameRound = async () => {
         prediction.status = 'won';
         prediction.winAmount = prediction.points * multiplier;
         
-        // Add points to user's demo balance
-        if (prediction.user) {
-          const user = await User.findById(prediction.user._id);
-          if (user) {
-            user.demoBalance += prediction.winAmount;
-            await user.save();
+          if (prediction.winAmount > 0) {
+            const user = await User.findById(prediction.user._id);
+            if (user) {
+              user.walletBalance += prediction.winAmount * 100;
+              await user.save();
+            }
           }
-        }
       } else {
         // User loses
         prediction.status = 'lost';

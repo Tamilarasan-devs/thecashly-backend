@@ -21,8 +21,12 @@ let recentCrashes = [];
 const initAviatorSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: '*', // Adjust for production
-      methods: ['GET', 'POST']
+      origin: [
+        'http://localhost:5173',
+        'https://thecashly-gamestore.vercel.app'
+      ],
+      methods: ['GET', 'POST'],
+      credentials: true
     }
   });
 
@@ -65,11 +69,11 @@ const initAviatorSocket = (server) => {
         }
 
         const user = await User.findById(socket.user._id);
-        if (user.demoBalance < points) {
+        if (user.walletBalance < points * 100) {
           return callback({ success: false, message: 'Insufficient balance.' });
         }
 
-        user.demoBalance -= points;
+        user.walletBalance -= points * 100;
         await user.save();
 
         const bet = await AviatorHistory.create({
@@ -91,7 +95,7 @@ const initAviatorSocket = (server) => {
         // Notify other clients about the new bet (optional, for "live bets" panel)
         io.emit('new_bet', { userId: user._id, points });
 
-        callback({ success: true, betId: bet._id, balance: user.demoBalance });
+        callback({ success: true, betId: bet._id, balance: user.walletBalance / 100 });
 
       } catch (error) {
         console.error('Place bet error:', error);
@@ -128,7 +132,8 @@ const initAviatorSocket = (server) => {
         const winAmount = Math.floor(betInfo.points * cashoutMulti);
         
         const user = await User.findById(socket.user._id);
-        user.demoBalance += winAmount;
+        // Winnings also go to walletBalance, or earningBalance? I will add to walletBalance to keep it as a unified playable balance.
+        user.walletBalance += winAmount * 100;
         await user.save();
 
         await AviatorHistory.findByIdAndUpdate(betId, {
@@ -142,7 +147,7 @@ const initAviatorSocket = (server) => {
           success: true, 
           winAmount, 
           multiplier: cashoutMulti, 
-          balance: user.demoBalance 
+          balance: user.walletBalance / 100 
         });
 
       } catch (error) {
@@ -249,7 +254,7 @@ const processAutoCashouts = async () => {
        try {
          const winAmount = Math.floor(betInfo.points * betInfo.autoCashout);
          const user = await User.findById(betInfo.userId);
-         user.demoBalance += winAmount;
+         user.walletBalance += winAmount * 100;
          await user.save();
 
          await AviatorHistory.findByIdAndUpdate(betId, {
@@ -264,7 +269,7 @@ const processAutoCashouts = async () => {
            betId,
            winAmount,
            multiplier: betInfo.autoCashout,
-           balance: user.demoBalance
+           balance: user.walletBalance / 100
          });
        } catch (err) {
          console.error('Auto cashout error:', err);
