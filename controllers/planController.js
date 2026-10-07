@@ -7,8 +7,8 @@ const { cloudinary } = require('../config/cloudinary');
 // @access  Public
 const getPlans = async (req, res, next) => {
   try {
-    // Customers only see active plans, admins see all
-    const query = (req.user && req.user.role === 'admin') ? {} : { status: 'active' };
+    // Customers only see active plans, admins see all non-archived
+    const query = (req.user && req.user.role === 'admin') ? { status: { $ne: 'archived' } } : { status: 'active' };
     const plans = await Plan.find(query).sort({ displayOrder: 1 });
     
     res.json({ success: true, data: plans });
