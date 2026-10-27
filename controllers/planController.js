@@ -7,10 +7,20 @@ const { cloudinary } = require('../config/cloudinary');
 // @access  Public
 const getPlans = async (req, res, next) => {
   try {
-    // Customers only see active plans, admins see all non-archived
-    const query = (req.user && req.user.role === 'admin') ? { status: { $ne: 'archived' } } : { status: 'active' };
-    const plans = await Plan.find(query).sort({ displayOrder: 1 });
-    
+    // All non-archived plans are returned: active ones show clearly, hidden ones show with blur effect
+    const plans = await Plan.find({ status: { $ne: 'archived' } }).sort({ displayOrder: 1, createdAt: -1 });
+    res.json({ success: true, data: plans });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get all plans for admin management (active, draft, hidden)
+// @route   GET /api/plans/admin
+// @access  Private/Admin
+const getAdminPlans = async (req, res, next) => {
+  try {
+    const plans = await Plan.find({ status: { $ne: 'archived' } }).sort({ displayOrder: 1, createdAt: -1 });
     res.json({ success: true, data: plans });
   } catch (error) {
     next(error);
@@ -23,12 +33,7 @@ const getPlans = async (req, res, next) => {
 const getPlan = async (req, res, next) => {
   try {
     const plan = await Plan.findById(req.params.id);
-    if (!plan) return next(new ApiError('Plan not found', 404));
-    
-    // Non-admins shouldn't see draft/archived plans
-    if (plan.status !== 'active' && (!req.user || req.user.role !== 'admin')) {
-      return next(new ApiError('Plan not found', 404));
-    }
+    if (!plan || plan.status === 'archived') return next(new ApiError('Plan not found', 404));
     
     res.json({ success: true, data: plan });
   } catch (error) {
@@ -41,8 +46,26 @@ const getPlan = async (req, res, next) => {
 // @access  Private/Admin
 const createPlan = async (req, res, next) => {
   try {
-    const { name, description, initialPayment, dailyAmount, durationDays, eligibilityRules, terms, status, displayOrder } = req.body;
+    const {
+      name,
+      description,
+      initialPayment,
+      dailyAmount,
+      durationDays,
+      eligibilityRules,
+      terms,
+      status,
+      displayOrder,
+      planType,
+      isSpecial,
+      isComingSoon,
+      badgeText
+    } = req.body;
     
+    let resolvedType = planType || 'regular';
+    if (isSpecial === 'true' || isSpecial === true) resolvedType = 'special';
+    if (isComingSoon === 'true' || isComingSoon === true) resolvedType = 'coming_soon';
+
     const planData = {
       name,
       description,
@@ -53,6 +76,10 @@ const createPlan = async (req, res, next) => {
       eligibilityRules,
       terms,
       status: status || 'draft',
+      planType: resolvedType,
+      isSpecial: resolvedType === 'special',
+      isComingSoon: resolvedType === 'coming_soon',
+      badgeText: badgeText || '',
       displayOrder: displayOrder || 0
     };
 
@@ -78,7 +105,21 @@ const updatePlan = async (req, res, next) => {
     let plan = await Plan.findById(req.params.id);
     if (!plan) return next(new ApiError('Plan not found', 404));
 
-    const { name, description, initialPayment, dailyAmount, durationDays, eligibilityRules, terms, status, displayOrder } = req.body;
+    const {
+      name,
+      description,
+      initialPayment,
+      dailyAmount,
+      durationDays,
+      eligibilityRules,
+      terms,
+      status,
+      displayOrder,
+      planType,
+      isSpecial,
+      isComingSoon,
+      badgeText
+    } = req.body;
 
     if (name) plan.name = name;
     if (description) plan.description = description;
@@ -90,14 +131,31 @@ const updatePlan = async (req, res, next) => {
     if (status) plan.status = status;
     if (displayOrder !== undefined) plan.displayOrder = displayOrder;
     
+    if (planType !== undefined || isSpecial !== undefined || isComingSoon !== undefined) {
+      let resolvedType = planType || plan.planType || 'regular';
+      if (isSpecial === 'true' || isSpecial === true) resolvedType = 'special';
+      if (isComingSoon === 'true' || isComingSoon === true) resolvedType = 'coming_soon';
+      if (isSpecial === 'false' && plan.planType === 'special') resolvedType = 'regular';
+      if (isComingSoon === 'false' && plan.planType === 'coming_soon') resolvedType = 'regular';
+
+      plan.planType = resolvedType;
+      plan.isSpecial = resolvedType === 'special';
+      plan.isComingSoon = resolvedType === 'coming_soon';
+    }
+    if (badgeText !== undefined) plan.badgeText = badgeText;
+
     if (dailyAmount || durationDays) {
       plan.totalScheduled = plan.dailyAmount * plan.durationDays;
     }
 
     if (req.file) {
-      // Delete old image from cloudinary if it exists
+      // Delete old image from cloudinary if it exists (safely ignore if not found or from prior account)
       if (plan.productImage && plan.productImage.publicId) {
-        await cloudinary.uploader.destroy(plan.productImage.publicId);
+        try {
+          await cloudinary.uploader.destroy(plan.productImage.publicId);
+        } catch (delErr) {
+          console.warn('Could not destroy old cloudinary image:', delErr.message);
+        }
       }
       
       plan.productImage = {
@@ -133,6 +191,7 @@ const deletePlan = async (req, res, next) => {
 
 module.exports = {
   getPlans,
+  getAdminPlans,
   getPlan,
   createPlan,
   updatePlan,

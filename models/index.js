@@ -11,6 +11,7 @@ const SupportTicket = require('./SupportTicket');
 const ColorRound = require('./ColorRound');
 const ColorPrediction = require('./ColorPrediction');
 const AviatorHistory = require('./AviatorHistory');
+const PaymentSetting = require('./PaymentSetting');
 
 module.exports = {
   User,
@@ -25,5 +26,6 @@ module.exports = {
   SupportTicket,
   ColorRound,
   ColorPrediction,
-  AviatorHistory
+  AviatorHistory,
+  PaymentSetting
 };

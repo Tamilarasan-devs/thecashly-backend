@@ -1,20 +1,45 @@
 const { Withdrawal } = require('../models');
 const { ApiError } = require('../middleware/errorHandler');
-const { requestWithdrawal, approveWithdrawal, rejectWithdrawal } = require('../services/withdrawal');
+const { 
+  requestWithdrawal, 
+  saveUserBankDetails, 
+  approveWithdrawal, 
+  rejectWithdrawal 
+} = require('../services/withdrawal');
+
+// @desc    Update or save user bank details
+// @route   PUT /api/withdrawals/bank-details
+// @access  Private
+const updateUserBankDetailsController = async (req, res, next) => {
+  try {
+    const payoutDetails = await saveUserBankDetails(req.user._id, req.body);
+    res.json({
+      success: true,
+      message: 'Bank details saved successfully',
+      data: payoutDetails
+    });
+  } catch (error) {
+    next(new ApiError(error.message, 400));
+  }
+};
 
 // @desc    Request a withdrawal
 // @route   POST /api/withdrawals/request
 // @access  Private
 const createWithdrawalRequest = async (req, res, next) => {
   try {
-    const { amount } = req.body;
+    const { amount, bankDetails } = req.body;
     
-    if (!amount || amount <= 0) {
-      return next(new ApiError('Invalid withdrawal amount', 400));
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      return next(new ApiError('Please enter a valid withdrawal amount', 400));
     }
     
-    const withdrawal = await requestWithdrawal(req.user._id, amount);
-    res.status(201).json({ success: true, data: withdrawal });
+    const withdrawal = await requestWithdrawal(req.user._id, Number(amount), bankDetails);
+    res.status(201).json({ 
+      success: true, 
+      message: 'Withdrawal requested successfully',
+      data: withdrawal 
+    });
   } catch (error) {
     next(new ApiError(error.message, 400));
   }
@@ -51,11 +76,7 @@ const approveWithdrawalRequest = async (req, res, next) => {
   try {
     const { paymentReference } = req.body;
     
-    if (!paymentReference) {
-      return next(new ApiError('Payment reference is required to approve', 400));
-    }
-    
-    const withdrawal = await approveWithdrawal(req.params.id, req.user._id, paymentReference);
+    const withdrawal = await approveWithdrawal(req.params.id, req.user._id, paymentReference || '');
     res.json({ success: true, data: withdrawal });
   } catch (error) {
     next(new ApiError(error.message, 400));
@@ -82,6 +103,7 @@ const rejectWithdrawalRequest = async (req, res, next) => {
 
 module.exports = {
   createWithdrawalRequest,
+  updateUserBankDetailsController,
   getUserWithdrawals,
   getAllWithdrawals,
   approveWithdrawalRequest,

@@ -96,7 +96,12 @@ const collectEarnings = async (req, res, next) => {
       }).session(session);
 
       if (eligiblePayouts.length === 0) {
-        throw new ApiError('No earnings to collect at this time', 400);
+        result = { 
+          success: true, 
+          amount: 0, 
+          message: 'No earnings to collect at this time. All eligible returns have already been claimed.' 
+        };
+        return;
       }
 
       const totalAmount = eligiblePayouts.reduce((sum, p) => sum + p.amount, 0);

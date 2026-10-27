@@ -67,9 +67,48 @@ const createSupportTicket = async (req, res, next) => {
   }
 };
 
+// @desc    Reply to an existing support ticket
+// @route   POST /api/services/tickets/:id/reply
+// @access  Private
+const replyToTicket = async (req, res, next) => {
+  try {
+    const { message } = req.body;
+    if (!message || !message.trim()) {
+      return next(new ApiError('Message cannot be empty', 400));
+    }
+
+    const ticket = await SupportTicket.findOne({
+      _id: req.params.id,
+      user: req.user._id
+    });
+
+    if (!ticket) {
+      return next(new ApiError('Ticket not found', 404));
+    }
+
+    ticket.responses.push({
+      sender: 'user',
+      message: message.trim(),
+      createdAt: new Date()
+    });
+
+    // If ticket was resolved/closed, reopen it for admin attention
+    if (ticket.status === 'resolved' || ticket.status === 'closed') {
+      ticket.status = 'open';
+    }
+
+    await ticket.save();
+
+    res.json({ success: true, data: ticket });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getTransactionHistory,
   getPayoutSchedule,
   getSupportTickets,
-  createSupportTicket
+  createSupportTicket,
+  replyToTicket
 };

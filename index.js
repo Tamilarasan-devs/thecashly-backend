@@ -8,19 +8,30 @@ const cron = require('node-cron');
 const { processPayouts } = require('./jobs/payoutJob');
 const { startColorGameJob } = require('./jobs/colorGameJob');
 
+const path = require('path');
+
 const app = express();
+
+// Allowed Origins for CORS
+const allowedOrigins = [
+  'https://thecashly-gamestore.vercel.app',
+  /^http:\/\/localhost(:\d+)?$/,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/
+];
+
+if (process.env.CLIENT_URL) {
+  allowedOrigins.push(process.env.CLIENT_URL);
+}
 
 // Middlewares
 app.use(cors({
-  origin: [
-    'http://localhost:5173', 
-    'https://thecashly-gamestore.vercel.app'
-  ],
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes placeholder
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
@@ -30,6 +41,7 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/withdrawals', require('./routes/withdrawals'));
 app.use('/api/topups', require('./routes/topUps'));
 app.use('/api/services', require('./routes/services'));
+app.use('/api/payment-settings', require('./routes/paymentSettings'));
 app.use('/api/admin', require('./routes/adminTools'));
 app.use('/api/colorgame', require('./routes/colorGame'));
 app.use('/api/aviator', require('./routes/aviator'));

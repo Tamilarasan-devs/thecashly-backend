@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { 
   createWithdrawalRequest, 
+  updateUserBankDetailsController,
   getUserWithdrawals, 
   getAllWithdrawals, 
   approveWithdrawalRequest, 
@@ -10,6 +11,7 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 
 router.post('/request', protect, createWithdrawalRequest);
+router.put('/bank-details', protect, updateUserBankDetailsController);
 router.get('/', protect, getUserWithdrawals);
 
 router.get('/admin', protect, authorize('admin'), getAllWithdrawals);

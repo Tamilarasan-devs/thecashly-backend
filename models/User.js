@@ -12,6 +12,9 @@ const userSchema = new mongoose.Schema({
     accountNumber: String,
     ifscCode: String,
     accountHolderName: String,
+    branchName: String,
+    upiId: String,
+    updatedAt: Date,
   },
   walletBalance: { type: Number, default: 0 }, // In paise
   earningBalance: { type: Number, default: 0 }, // In paise

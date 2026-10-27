@@ -5,7 +5,12 @@ const topUpSchema = new mongoose.Schema({
   amount: { type: Number, required: true }, // In paise
   status: { type: String, enum: ['pending', 'verified', 'failed'], default: 'pending' },
   gatewayReference: { type: String, unique: true, sparse: true },
-  paymentMethod: { type: String },
+  utr: { type: String, trim: true, sparse: true },
+  screenshotUrl: { type: String },
+  rejectionReason: { type: String },
+  reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  reviewedAt: { type: Date },
+  paymentMethod: { type: String, default: 'manual_upi' },
   verifiedAt: { type: Date },
 }, { timestamps: true });
 

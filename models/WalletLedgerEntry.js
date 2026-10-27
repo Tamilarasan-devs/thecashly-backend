@@ -10,6 +10,6 @@ const walletLedgerEntrySchema = new mongoose.Schema({
   balanceType: { type: String, enum: ['wallet', 'earning'], default: 'wallet' }
 }, { timestamps: true });
 
-walletLedgerEntrySchema.index({ referenceId: 1, referenceModel: 1 }, { unique: true, sparse: true });
+walletLedgerEntrySchema.index({ referenceId: 1, referenceModel: 1, type: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('WalletLedgerEntry', walletLedgerEntrySchema);

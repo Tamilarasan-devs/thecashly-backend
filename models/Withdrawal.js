@@ -9,6 +9,8 @@ const withdrawalSchema = new mongoose.Schema({
     accountNumber: String,
     ifscCode: String,
     accountHolderName: String,
+    branchName: String,
+    upiId: String,
   },
   adminReason: { type: String }, // If rejected or manually processed
   paymentReference: { type: String }, // From the payout gateway

@@ -84,9 +84,34 @@ router.put('/tickets/:id', protect, authorize('admin'), async (req, res, next) =
   }
 });
 
-const { getAllTopUps } = require('../controllers/topUpController');
+const { getAllTopUps, approveTopUp, rejectTopUp } = require('../controllers/topUpController');
+const upload = require('../middleware/upload');
+const {
+  getAdminPaymentSetting,
+  updatePaymentSetting,
+  addPaymentChannel,
+  updatePaymentChannel,
+  deletePaymentChannel,
+  setPrimaryPaymentChannel,
+  togglePaymentChannel
+} = require('../controllers/paymentSettingController');
 
 // Admin: Get all top ups
 router.get('/topups', protect, authorize('admin'), getAllTopUps);
+router.post('/topups/:id/approve', protect, authorize('admin'), approveTopUp);
+router.post('/topups/:id/reject', protect, authorize('admin'), rejectTopUp);
+
+// Admin: Payment Settings (QR Code, UPI ID, Min/Max Limits)
+router.get('/payment-settings', protect, authorize('admin'), getAdminPaymentSetting);
+router.put('/payment-settings', protect, authorize('admin'), upload.single('qrImage'), updatePaymentSetting);
+router.post('/payment-settings', protect, authorize('admin'), upload.single('qrImage'), updatePaymentSetting);
+
+// Admin: Payment Channels Management
+router.post('/payment-settings/channels', protect, authorize('admin'), upload.single('qrImage'), addPaymentChannel);
+router.put('/payment-settings/channels/:channelId', protect, authorize('admin'), upload.single('qrImage'), updatePaymentChannel);
+router.delete('/payment-settings/channels/:channelId', protect, authorize('admin'), deletePaymentChannel);
+router.patch('/payment-settings/channels/:channelId/primary', protect, authorize('admin'), setPrimaryPaymentChannel);
+router.patch('/payment-settings/channels/:channelId/toggle', protect, authorize('admin'), togglePaymentChannel);
 
 module.exports = router;
+

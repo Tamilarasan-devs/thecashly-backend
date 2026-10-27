@@ -19,12 +19,19 @@ let activeBets = new Map(); // betId -> betInfo
 let recentCrashes = [];
 
 const initAviatorSocket = (server) => {
+  const allowedOrigins = [
+    'https://thecashly-gamestore.vercel.app',
+    /^http:\/\/localhost(:\d+)?$/,
+    /^http:\/\/127\.0\.0\.1(:\d+)?$/
+  ];
+
+  if (process.env.CLIENT_URL) {
+    allowedOrigins.push(process.env.CLIENT_URL);
+  }
+
   io = new Server(server, {
     cors: {
-      origin: [
-        'http://localhost:5173',
-        'https://thecashly-gamestore.vercel.app'
-      ],
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true
     }

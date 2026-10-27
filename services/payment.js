@@ -16,6 +16,9 @@ async function purchasePlanFromWallet(userId, planId) {
       
       if (!user) throw new Error('User not found');
       if (!plan || plan.status !== 'active') throw new Error('Plan is not available');
+      if (plan.isComingSoon || plan.planType === 'coming_soon') {
+        throw new Error('This plan is coming soon and cannot be purchased yet.');
+      }
       
       if (user.walletBalance < plan.initialPayment) {
         const shortage = plan.initialPayment - user.walletBalance;
