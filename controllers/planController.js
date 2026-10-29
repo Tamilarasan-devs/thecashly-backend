@@ -8,7 +8,10 @@ const { cloudinary } = require('../config/cloudinary');
 const getPlans = async (req, res, next) => {
   try {
     // All non-archived plans are returned: active ones show clearly, hidden ones show with blur effect
-    const plans = await Plan.find({ status: { $ne: 'archived' } }).sort({ displayOrder: 1, createdAt: -1 });
+    const plans = await Plan.find({ status: { $ne: 'archived' } })
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
+    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     res.json({ success: true, data: plans });
   } catch (error) {
     next(error);
@@ -32,7 +35,7 @@ const getAdminPlans = async (req, res, next) => {
 // @access  Public
 const getPlan = async (req, res, next) => {
   try {
-    const plan = await Plan.findById(req.params.id);
+    const plan = await Plan.findById(req.params.id).lean();
     if (!plan || plan.status === 'archived') return next(new ApiError('Plan not found', 404));
     
     res.json({ success: true, data: plan });

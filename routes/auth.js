@@ -1,11 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { registerUser, loginUser, getMe, updateProfile } = require('../controllers/authController');
+const { 
+  registerUser, 
+  loginUser, 
+  getMe, 
+  updateProfile,
+  validateReferralCode,
+  getReferralStats
+} = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 
 router.post('/register', registerUser);
 router.post('/login', loginUser);
 router.get('/me', protect, getMe);
 router.put('/me', protect, updateProfile);
+router.get('/referral/validate/:code', validateReferralCode);
+router.get('/referrals', protect, getReferralStats);
 
 module.exports = router;

@@ -44,7 +44,10 @@ router.post('/trigger-payouts', protect, authorize('admin'), async (req, res, ne
 // Admin: Get all users
 router.get('/users', protect, authorize('admin'), async (req, res, next) => {
   try {
-    const users = await User.find({}).select('-passwordHash').sort('-createdAt');
+    const users = await User.find({})
+      .select('-passwordHash')
+      .populate('referredBy', 'name email referralCode')
+      .sort('-createdAt');
     res.json({ success: true, data: users });
   } catch (err) {
     next(err);

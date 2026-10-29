@@ -20,4 +20,6 @@ const planSubscriptionSchema = new mongoose.Schema({
   status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active' },
 }, { timestamps: true });
 
+planSubscriptionSchema.index({ user: 1, status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('PlanSubscription', planSubscriptionSchema);

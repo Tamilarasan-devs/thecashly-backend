@@ -139,7 +139,7 @@ const submitManualTopUp = async (req, res, next) => {
 // @access  Private
 const getUserTopUps = async (req, res, next) => {
   try {
-    const topUps = await TopUp.find({ user: req.user._id }).sort('-createdAt');
+    const topUps = await TopUp.find({ user: req.user._id }).sort('-createdAt').limit(100).lean();
     res.json({ success: true, data: topUps });
   } catch (error) {
     next(error);
@@ -154,7 +154,9 @@ const getAllTopUps = async (req, res, next) => {
     const topUps = await TopUp.find({})
       .populate('user', 'name email phone')
       .populate('reviewedBy', 'name email')
-      .sort('-createdAt');
+      .sort('-createdAt')
+      .limit(200)
+      .lean();
     res.json({ success: true, data: topUps });
   } catch (error) {
     next(error);

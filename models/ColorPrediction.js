@@ -11,7 +11,7 @@ const colorPredictionSchema = new mongoose.Schema({
   winAmount: { type: Number, default: 0 }
 }, { timestamps: true });
 
-// We can remove the unique constraint because users can bet multiple times on different things
-// colorPredictionSchema.index({ user: 1, roundId: 1 }, { unique: true });
+colorPredictionSchema.index({ roundId: 1, status: 1 });
+colorPredictionSchema.index({ user: 1, createdAt: -1 });
 
 module.exports = mongoose.model('ColorPrediction', colorPredictionSchema);

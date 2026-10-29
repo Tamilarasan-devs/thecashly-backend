@@ -50,7 +50,10 @@ const createWithdrawalRequest = async (req, res, next) => {
 // @access  Private
 const getUserWithdrawals = async (req, res, next) => {
   try {
-    const withdrawals = await Withdrawal.find({ user: req.user._id }).sort('-createdAt');
+    const withdrawals = await Withdrawal.find({ user: req.user._id })
+      .sort('-createdAt')
+      .limit(100)
+      .lean();
     res.json({ success: true, data: withdrawals });
   } catch (error) {
     next(error);
@@ -62,7 +65,11 @@ const getUserWithdrawals = async (req, res, next) => {
 // @access  Private/Admin
 const getAllWithdrawals = async (req, res, next) => {
   try {
-    const withdrawals = await Withdrawal.find({}).populate('user', 'name email').sort('-createdAt');
+    const withdrawals = await Withdrawal.find({})
+      .populate('user', 'name email')
+      .sort('-createdAt')
+      .limit(200)
+      .lean();
     res.json({ success: true, data: withdrawals });
   } catch (error) {
     next(error);

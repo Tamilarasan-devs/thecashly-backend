@@ -54,8 +54,8 @@ async function requestWithdrawal(userId, amount, bankDetails = null) {
     throw new Error('Please enter a valid withdrawal amount');
   }
 
-  if (amount < 10000) {
-    throw new Error('Minimum withdrawal amount is ₹100');
+  if (amount < 20000) {
+    throw new Error('Minimum withdrawal amount is ₹200');
   }
 
   const session = await mongoose.startSession();

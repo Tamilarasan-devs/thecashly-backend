@@ -116,11 +116,13 @@ const getHistory = async (req, res, next) => {
     const latestRounds = await ColorRound.find({ status: 'completed' })
       .sort({ roundId: -1 })
       .limit(limit)
-      .select('roundId winningColor winningNumber price -_id');
+      .select('roundId winningColor winningNumber price -_id')
+      .lean();
 
     const userHistory = await ColorPrediction.find({ user: req.user.id })
       .sort({ createdAt: -1 })
-      .limit(50);
+      .limit(50)
+      .lean();
 
     res.json({
       success: true,

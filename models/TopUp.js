@@ -14,4 +14,8 @@ const topUpSchema = new mongoose.Schema({
   verifiedAt: { type: Date },
 }, { timestamps: true });
 
+topUpSchema.index({ user: 1, createdAt: -1 });
+topUpSchema.index({ status: 1, createdAt: -1 });
+topUpSchema.index({ utr: 1 });
+
 module.exports = mongoose.model('TopUp', topUpSchema);

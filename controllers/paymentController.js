@@ -38,10 +38,12 @@ const getSubscriptions = async (req, res, next) => {
       .sort('-createdAt')
       .lean();
       
-    // Fetch all payouts for this user
+    // Fetch all payouts for this user (selecting only required projection fields)
     const allPayouts = await PayoutSchedule.find({
       user: req.user._id
-    }).lean();
+    })
+      .select('planSubscription status amount eligibilityDate')
+      .lean();
 
     // Attach eligible, collected, and pending amounts to each subscription
     const subsWithAmounts = subscriptions.map(sub => {

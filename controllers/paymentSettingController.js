@@ -83,13 +83,16 @@ const getActivePaymentSetting = async (req, res, next) => {
       const currentIndex = (setting.rotationCounter || 0) % activeChannels.length;
       assigned = activeChannels[currentIndex];
 
-      // Increment rotation counter and track usageCount for equal usage
-      setting.rotationCounter = ((setting.rotationCounter || 0) + 1) % 1000000;
-      const chDoc = setting.channels.id(assigned._id);
-      if (chDoc) {
-        chDoc.usageCount = (chDoc.usageCount || 0) + 1;
-      }
-      await setting.save();
+      // Increment rotation counter and track usageCount asynchronously in background (non-blocking)
+      const nextCounter = ((setting.rotationCounter || 0) + 1) % 1000000;
+      setting.rotationCounter = nextCounter;
+      PaymentSetting.updateOne(
+        { _id: setting._id, 'channels._id': assigned._id },
+        { 
+          $set: { rotationCounter: nextCounter },
+          $inc: { 'channels.$.usageCount': 1 }
+        }
+      ).catch((err) => console.error('[PaymentSetting Rotation Error]', err));
     } else if (activeChannels.length === 1) {
       assigned = activeChannels[0];
     } else {
@@ -101,6 +104,7 @@ const getActivePaymentSetting = async (req, res, next) => {
       };
     }
 
+    res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
     res.json({
       success: true,
       data: {

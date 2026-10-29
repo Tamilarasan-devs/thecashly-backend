@@ -10,4 +10,8 @@ const payoutScheduleSchema = new mongoose.Schema({
   processedAt: { type: Date },
 }, { timestamps: true });
 
+payoutScheduleSchema.index({ user: 1, scheduledDate: -1 });
+payoutScheduleSchema.index({ status: 1, eligibilityDate: 1 });
+payoutScheduleSchema.index({ planSubscription: 1 });
+
 module.exports = mongoose.model('PayoutSchedule', payoutScheduleSchema);

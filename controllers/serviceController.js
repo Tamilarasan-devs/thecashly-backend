@@ -8,7 +8,9 @@ const getTransactionHistory = async (req, res, next) => {
   try {
     const history = await WalletLedgerEntry.find({ user: req.user._id })
       .populate('referenceId')
-      .sort('-createdAt');
+      .sort('-createdAt')
+      .limit(100)
+      .lean();
     res.json({ success: true, data: history });
   } catch (error) {
     next(error);
@@ -25,7 +27,8 @@ const getPayoutSchedule = async (req, res, next) => {
         path: 'planSubscription',
         populate: { path: 'plan', select: 'name' }
       })
-      .sort('scheduledDate');
+      .sort('scheduledDate')
+      .lean();
     res.json({ success: true, data: schedule });
   } catch (error) {
     next(error);
@@ -37,7 +40,7 @@ const getPayoutSchedule = async (req, res, next) => {
 // @access  Private
 const getSupportTickets = async (req, res, next) => {
   try {
-    const tickets = await SupportTicket.find({ user: req.user._id }).sort('-createdAt');
+    const tickets = await SupportTicket.find({ user: req.user._id }).sort('-createdAt').lean();
     res.json({ success: true, data: tickets });
   } catch (error) {
     next(error);

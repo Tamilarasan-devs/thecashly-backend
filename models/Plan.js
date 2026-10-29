@@ -21,6 +21,8 @@ const planSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+planSchema.index({ status: 1, displayOrder: 1, createdAt: -1 });
+
 // Ensure isSpecial, isComingSoon, and planType stay in sync
 planSchema.pre('save', function () {
   if (this.planType === 'special') {

@@ -10,4 +10,6 @@ const colorRoundSchema = new mongoose.Schema({
   endTime: { type: Date, required: true },
 }, { timestamps: true });
 
+colorRoundSchema.index({ status: 1, roundId: -1 });
+
 module.exports = mongoose.model('ColorRound', colorRoundSchema);

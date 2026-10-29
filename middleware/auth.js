@@ -2,6 +2,32 @@ const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const { ApiError } = require('./errorHandler');
 
+// Short-lived in-memory cache to eliminate redundant User.findById queries during parallel requests
+const authUserCache = new Map();
+const AUTH_CACHE_TTL_MS = 8000; // 8 seconds
+
+const getCachedUser = async (userId) => {
+  const cached = authUserCache.get(userId);
+  if (cached && (Date.now() - cached.timestamp < AUTH_CACHE_TTL_MS)) {
+    return cached.user;
+  }
+  const user = await User.findById(userId).select('-passwordHash');
+  if (user) {
+    authUserCache.set(userId, { user, timestamp: Date.now() });
+    if (authUserCache.size > 2000) {
+      const oldestKey = authUserCache.keys().next().value;
+      authUserCache.delete(oldestKey);
+    }
+  }
+  return user;
+};
+
+const invalidateAuthCache = (userId) => {
+  if (userId) {
+    authUserCache.delete(userId.toString());
+  }
+};
+
 const protect = async (req, res, next) => {
   let token;
   
@@ -16,7 +42,7 @@ const protect = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_for_dev');
     
-    req.user = await User.findById(decoded.id).select('-passwordHash');
+    req.user = await getCachedUser(decoded.id);
     
     if (!req.user) {
       return next(new ApiError('User not found', 404));
@@ -63,4 +89,4 @@ const optionalAuth = async (req, res, next) => {
   next();
 };
 
-module.exports = { protect, authorize, optionalAuth };
+module.exports = { protect, authorize, optionalAuth, invalidateAuthCache };
