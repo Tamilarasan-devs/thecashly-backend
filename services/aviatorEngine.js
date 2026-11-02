@@ -21,6 +21,8 @@ let recentCrashes = [];
 const initAviatorSocket = (server) => {
   const allowedOrigins = [
     'https://thecashly-gamestore.vercel.app',
+    'https://thecashly.in',
+    'https://www.thecashly.in',
     /^http:\/\/localhost(:\d+)?$/,
     /^http:\/\/127\.0\.0\.1(:\d+)?$/
   ];
