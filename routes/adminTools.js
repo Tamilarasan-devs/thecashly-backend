@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middleware/auth');
 const { processPayouts } = require('../jobs/payoutJob');
-const { User, SupportTicket, PlanSubscription, Withdrawal, TopUp } = require('../models');
+const { User, SupportTicket, PlanSubscription, Withdrawal, TopUp, ReferralReward } = require('../models');
 
 // Admin: Get Dashboard Stats
 router.get('/stats', protect, authorize('admin'), async (req, res, next) => {
@@ -10,6 +10,9 @@ router.get('/stats', protect, authorize('admin'), async (req, res, next) => {
     const totalUsers = await User.countDocuments({ role: 'customer' });
     const activePlans = await PlanSubscription.countDocuments({ status: 'active' });
     const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'requested' });
+    const pendingReferrals = await ReferralReward.countDocuments({ 
+      status: { $in: ['pending_admin', 'referrer_paid'] } 
+    });
     
     const topUps = await TopUp.aggregate([
       { $match: { status: 'verified' } },
@@ -23,6 +26,7 @@ router.get('/stats', protect, authorize('admin'), async (req, res, next) => {
         totalUsers,
         activePlans,
         pendingWithdrawals,
+        pendingReferrals,
         totalDeposits
       }
     });
@@ -98,6 +102,18 @@ const {
   setPrimaryPaymentChannel,
   togglePaymentChannel
 } = require('../controllers/paymentSettingController');
+const {
+  getAdminReferralRewards,
+  sendReferrerReward,
+  sendReferredUserReward,
+  rejectReferralReward
+} = require('../controllers/referralAdminController');
+
+// Admin: Referral Rewards Management
+router.get('/referrals', protect, authorize('admin'), getAdminReferralRewards);
+router.post('/referrals/:id/send-referrer', protect, authorize('admin'), sendReferrerReward);
+router.post('/referrals/:id/send-referred-user', protect, authorize('admin'), sendReferredUserReward);
+router.post('/referrals/:id/reject', protect, authorize('admin'), rejectReferralReward);
 
 // Admin: Get all top ups
 router.get('/topups', protect, authorize('admin'), getAllTopUps);

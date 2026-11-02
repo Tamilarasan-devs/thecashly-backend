@@ -108,11 +108,116 @@ const rejectWithdrawalRequest = async (req, res, next) => {
   }
 };
 
+// @desc    Create manual withdrawal statement (Admin only)
+// @route   POST /api/withdrawals/admin/manual-statement
+// @access  Private/Admin
+const createManualWithdrawalStatement = async (req, res, next) => {
+  try {
+    const { userId, amount, date, bankDetails, note, reference } = req.body;
+    const { User, WalletLedgerEntry } = require('../models');
+
+    if (!userId) {
+      return next(new ApiError('Please select a user', 400));
+    }
+
+    const numAmount = Number(amount);
+    if (!amount || isNaN(numAmount) || numAmount <= 0) {
+      return next(new ApiError('Please enter a valid withdrawal amount', 400));
+    }
+
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return next(new ApiError('User not found', 404));
+    }
+
+    const statementDate = date ? new Date(date) : new Date();
+    if (isNaN(statementDate.getTime())) {
+      return next(new ApiError('Invalid date provided', 400));
+    }
+
+    const amountInPaise = Math.round(numAmount * 100);
+
+    // Use bankDetails provided in payload or fall back to user's saved payoutDetails
+    const finalSnapshot = {
+      accountHolderName: bankDetails?.accountHolderName || targetUser.payoutDetails?.accountHolderName || targetUser.name,
+      bankName: bankDetails?.bankName || targetUser.payoutDetails?.bankName || 'Direct Payout / Manual Transfer',
+      accountNumber: bankDetails?.accountNumber || targetUser.payoutDetails?.accountNumber || 'Manual',
+      ifscCode: bankDetails?.ifscCode || targetUser.payoutDetails?.ifscCode || 'MANUAL001',
+      branchName: bankDetails?.branchName || targetUser.payoutDetails?.branchName || 'Head Office',
+      upiId: bankDetails?.upiId || targetUser.payoutDetails?.upiId || ''
+    };
+
+    const paymentRef = reference?.trim() || `MAN-WD-${Date.now()}`;
+    const adminNote = note?.trim() || 'Manual Withdrawal Statement Entry by Admin';
+
+    // Create the withdrawal record directly marked as 'paid'
+    const withdrawal = new Withdrawal({
+      user: targetUser._id,
+      amount: amountInPaise,
+      status: 'paid',
+      payoutDetailsSnapshot: finalSnapshot,
+      adminReason: adminNote,
+      paymentReference: paymentRef,
+      isManualStatement: true,
+      statementDate: statementDate,
+      processedAt: statementDate,
+      createdAt: statementDate
+    });
+
+    await withdrawal.save();
+
+    // Create corresponding ledger entry so user's statement / history matches
+    try {
+      const ledgerEntry = new WalletLedgerEntry({
+        user: targetUser._id,
+        amount: -amountInPaise,
+        type: 'debit',
+        description: `Withdrawal payout of ₹${numAmount.toFixed(2)} to ${finalSnapshot.bankName} (${finalSnapshot.accountNumber}) [Ref: ${paymentRef}]`,
+        referenceId: withdrawal._id,
+        referenceModel: 'Withdrawal',
+        balanceType: 'earning',
+        createdAt: statementDate
+      });
+      await ledgerEntry.save();
+    } catch (ledgerErr) {
+      console.warn('Ledger entry note on manual statement:', ledgerErr.message);
+    }
+
+    const populatedWithdrawal = await Withdrawal.findById(withdrawal._id).populate('user', 'name email');
+
+    res.status(201).json({
+      success: true,
+      message: `Manual withdrawal statement of ₹${numAmount.toFixed(2)} recorded for ${targetUser.name}`,
+      data: populatedWithdrawal
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get all manual withdrawal statements (admin)
+// @route   GET /api/withdrawals/admin/manual-statements
+// @access  Private/Admin
+const getManualWithdrawalStatements = async (req, res, next) => {
+  try {
+    const list = await Withdrawal.find({ isManualStatement: true })
+      .populate('user', 'name email payoutDetails')
+      .sort('-createdAt')
+      .limit(200)
+      .lean();
+    res.json({ success: true, data: list });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createWithdrawalRequest,
   updateUserBankDetailsController,
   getUserWithdrawals,
   getAllWithdrawals,
   approveWithdrawalRequest,
-  rejectWithdrawalRequest
+  rejectWithdrawalRequest,
+  createManualWithdrawalStatement,
+  getManualWithdrawalStatements
 };

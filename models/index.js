@@ -12,6 +12,7 @@ const ColorRound = require('./ColorRound');
 const ColorPrediction = require('./ColorPrediction');
 const AviatorHistory = require('./AviatorHistory');
 const PaymentSetting = require('./PaymentSetting');
+const ReferralReward = require('./ReferralReward');
 
 module.exports = {
   User,
@@ -27,5 +28,6 @@ module.exports = {
   ColorRound,
   ColorPrediction,
   AviatorHistory,
-  PaymentSetting
+  PaymentSetting,
+  ReferralReward
 };

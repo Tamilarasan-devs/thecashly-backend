@@ -58,40 +58,8 @@ const registerUser = async (req, res, next) => {
       passwordHash,
       referralCode: newReferralCode,
       referredBy: referrer ? referrer._id : null,
-      walletBalance: referrer ? REFERRAL_BONUS_REFEREE : 0,
+      walletBalance: 0,
     });
-
-    // Credit referrer if referral code was used
-    if (referrer) {
-      referrer.walletBalance = (referrer.walletBalance || 0) + REFERRAL_BONUS_REFERRER;
-      referrer.referralEarnings = (referrer.referralEarnings || 0) + REFERRAL_BONUS_REFERRER;
-      await referrer.save();
-
-      // Record ledger history for referrer and referee
-      try {
-        await WalletLedgerEntry.create({
-          user: referrer._id,
-          amount: REFERRAL_BONUS_REFERRER,
-          type: 'credit',
-          description: `Referral bonus for inviting ${user.name}`,
-          referenceId: user._id,
-          referenceModel: 'User',
-          balanceType: 'wallet'
-        });
-
-        await WalletLedgerEntry.create({
-          user: user._id,
-          amount: REFERRAL_BONUS_REFEREE,
-          type: 'credit',
-          description: `Welcome bonus for using referral code ${referrer.referralCode}`,
-          referenceId: referrer._id,
-          referenceModel: 'User',
-          balanceType: 'wallet'
-        });
-      } catch (ledgerErr) {
-        console.error('[Referral] WalletLedgerEntry creation error:', ledgerErr);
-      }
-    }
     
     res.status(201).json({
       success: true,
@@ -229,6 +197,14 @@ const getReferralStats = async (req, res, next) => {
       .select('name email createdAt')
       .sort('-createdAt');
 
+    // Fetch any manual rewards credited for these referrals
+    const { ReferralReward } = require('../models');
+    const rewards = await ReferralReward.find({ referrer: userId }).lean();
+    const rewardsMap = new Map();
+    rewards.forEach(rw => {
+      rewardsMap.set(String(rw.referredUser), rw);
+    });
+
     const formattedReferrals = referrals.map(r => {
       const emailParts = (r.email || '').split('@');
       const prefix = emailParts[0] || '';
@@ -237,12 +213,20 @@ const getReferralStats = async (req, res, next) => {
         ? `${prefix.slice(0, 2)}***@${domain}` 
         : `*@${domain}`;
 
+      const rewardInfo = rewardsMap.get(String(r._id));
+      const hasDeposited = Boolean(rewardInfo);
+      const isRewardPaid = Boolean(rewardInfo && rewardInfo.referrerRewardAmount > 0);
+      const rewardAmount = isRewardPaid ? rewardInfo.referrerRewardAmount : 0;
+
       return {
         _id: r._id,
         name: r.name,
         email: obscuredEmail,
         createdAt: r.createdAt,
-        rewardAmount: REFERRAL_BONUS_REFERRER
+        hasDeposited,
+        isRewardPaid,
+        status: isRewardPaid ? 'Reward Credited' : (hasDeposited ? 'Deposit Under Review' : 'Registered (No Deposit)'),
+        rewardAmount: rewardAmount || 0
       };
     });
 
@@ -251,7 +235,7 @@ const getReferralStats = async (req, res, next) => {
       data: {
         referralCode: user.referralCode,
         totalReferrals: referrals.length,
-        totalEarnings: user.referralEarnings || (referrals.length * REFERRAL_BONUS_REFERRER),
+        totalEarnings: user.referralEarnings || 0,
         rewardPerReferral: REFERRAL_BONUS_REFERRER,
         refereeBonus: REFERRAL_BONUS_REFEREE,
         referrals: formattedReferrals

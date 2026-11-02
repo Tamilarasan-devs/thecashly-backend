@@ -1,6 +1,7 @@
 const { TopUp } = require('../models');
 const { ApiError } = require('../middleware/errorHandler');
 const { recordLedgerEntry } = require('../services/ledger');
+const { triggerReferralCheckOnDeposit } = require('./referralAdminController');
 
 // @desc    Initialize a top-up
 // @route   POST /api/topups/init
@@ -71,6 +72,13 @@ const verifySandboxTopUp = async (req, res, next) => {
         topUp._id,
         'TopUp'
       );
+
+      // Audit and notify referral workflow if user was referred
+      try {
+        await triggerReferralCheckOnDeposit(topUp);
+      } catch (refErr) {
+        console.error('[TopUp] Error checking referral reward:', refErr);
+      }
       
       res.json({ success: true, message: 'Top-up successful', data: topUp });
     } else {
@@ -192,6 +200,13 @@ const approveTopUp = async (req, res, next) => {
       topUp._id,
       'TopUp'
     );
+
+    // Audit and trigger referral review if user was referred
+    try {
+      await triggerReferralCheckOnDeposit(topUp);
+    } catch (refErr) {
+      console.error('[TopUp] Error checking referral reward:', refErr);
+    }
 
     res.json({
       success: true,
