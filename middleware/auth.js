@@ -1,19 +1,22 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const { ApiError } = require('./errorHandler');
+const { getActiveTenant } = require('../config/tenantContext');
 
 // Short-lived in-memory cache to eliminate redundant User.findById queries during parallel requests
 const authUserCache = new Map();
 const AUTH_CACHE_TTL_MS = 8000; // 8 seconds
 
 const getCachedUser = async (userId) => {
-  const cached = authUserCache.get(userId);
+  const tenant = getActiveTenant();
+  const cacheKey = `${tenant}:${userId}`;
+  const cached = authUserCache.get(cacheKey);
   if (cached && (Date.now() - cached.timestamp < AUTH_CACHE_TTL_MS)) {
     return cached.user;
   }
   const user = await User.findById(userId).select('-passwordHash');
   if (user) {
-    authUserCache.set(userId, { user, timestamp: Date.now() });
+    authUserCache.set(cacheKey, { user, timestamp: Date.now() });
     if (authUserCache.size > 2000) {
       const oldestKey = authUserCache.keys().next().value;
       authUserCache.delete(oldestKey);
@@ -24,7 +27,8 @@ const getCachedUser = async (userId) => {
 
 const invalidateAuthCache = (userId) => {
   if (userId) {
-    authUserCache.delete(userId.toString());
+    const tenant = getActiveTenant();
+    authUserCache.delete(`${tenant}:${userId.toString()}`);
   }
 };
 

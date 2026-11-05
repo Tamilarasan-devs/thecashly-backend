@@ -1,4 +1,4 @@
-const { TopUp } = require('../models');
+const { TopUp, Notification } = require('../models');
 const { ApiError } = require('../middleware/errorHandler');
 const { recordLedgerEntry } = require('../services/ledger');
 const { triggerReferralCheckOnDeposit } = require('./referralAdminController');
@@ -206,6 +206,20 @@ const approveTopUp = async (req, res, next) => {
       await triggerReferralCheckOnDeposit(topUp);
     } catch (refErr) {
       console.error('[TopUp] Error checking referral reward:', refErr);
+    }
+
+    // Send user notification for approved deposit
+    try {
+      await Notification.create({
+        user: topUp.user,
+        title: 'Deposit Approved! 💰',
+        message: `Your wallet deposit of ₹${(topUp.amount / 100).toFixed(2)} has been verified and added to your balance.`,
+        type: 'deposit_approved',
+        amount: topUp.amount,
+        metadata: { topUpId: topUp._id, utr: topUp.utr }
+      });
+    } catch (notifErr) {
+      console.error('[Notification] Failed to create deposit notification:', notifErr.message);
     }
 
     res.json({

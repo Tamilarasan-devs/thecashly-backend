@@ -1,19 +1,24 @@
 const { PaymentSetting } = require('../models');
 const { ApiError } = require('../middleware/errorHandler');
+const { getActiveTenant } = require('../config/tenantContext');
 
 // Helper to get or create default payment setting and ensure channels migration
 const getOrCreateDefaultSetting = async () => {
+  const tenant = getActiveTenant();
+  const defaultUpiId = tenant === 'earnbuddy' ? 'earnbuddy@upi' : 'cashly@upi';
+  const defaultUpiName = tenant === 'earnbuddy' ? 'EarnBuddy Payments' : 'The Cashly Payments';
+
   let setting = await PaymentSetting.findOne().sort('-updatedAt');
   if (!setting) {
     setting = await PaymentSetting.create({
-      upiId: 'cashly@upi',
-      upiName: 'The Cashly Payments',
+      upiId: defaultUpiId,
+      upiName: defaultUpiName,
       qrCodeImage: '',
       channels: [
         {
           title: 'Primary UPI QR',
-          upiId: 'cashly@upi',
-          upiName: 'The Cashly Payments',
+          upiId: defaultUpiId,
+          upiName: defaultUpiName,
           qrCodeImage: '',
           isActive: true,
           isPrimary: true
@@ -31,8 +36,8 @@ const getOrCreateDefaultSetting = async () => {
       setting.channels = [
         {
           title: 'Primary UPI QR',
-          upiId: setting.upiId || 'cashly@upi',
-          upiName: setting.upiName || 'The Cashly Payments',
+          upiId: setting.upiId || defaultUpiId,
+          upiName: setting.upiName || defaultUpiName,
           qrCodeImage: setting.qrCodeImage || '',
           isActive: true,
           isPrimary: true
@@ -71,6 +76,7 @@ const getOrCreateDefaultSetting = async () => {
 // @access  Public / Private
 const getActivePaymentSetting = async (req, res, next) => {
   try {
+    const tenant = getActiveTenant();
     const setting = await getOrCreateDefaultSetting();
     const activeChannels = (setting.channels || []).filter(c => c.isActive);
 
@@ -98,8 +104,8 @@ const getActivePaymentSetting = async (req, res, next) => {
     } else {
       assigned = {
         title: 'UPI QR',
-        upiId: setting.upiId || 'cashly@upi',
-        upiName: setting.upiName || 'The Cashly Payments',
+        upiId: setting.upiId || (tenant === 'earnbuddy' ? 'earnbuddy@upi' : 'cashly@upi'),
+        upiName: setting.upiName || (tenant === 'earnbuddy' ? 'EarnBuddy Payments' : 'The Cashly Payments'),
         qrCodeImage: setting.qrCodeImage || ''
       };
     }

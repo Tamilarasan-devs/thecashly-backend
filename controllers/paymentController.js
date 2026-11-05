@@ -84,18 +84,27 @@ const getSubscriptions = async (req, res, next) => {
 // @desc    Collect daily earnings for a subscription
 // @route   POST /api/payments/subscriptions/:id/collect
 // @access  Private
+const { getActiveTenant } = require('../config/tenantContext');
+const { startTenantSession } = require('../config/dbManager');
+
 const collectEarnings = async (req, res, next) => {
-  const session = await mongoose.startSession();
+  const tenant = getActiveTenant();
+  const session = await startTenantSession(tenant);
+
   try {
     let result = { success: false, amount: 0 };
-    await session.withTransaction(async () => {
+
+    const executeCollect = async (activeSession) => {
       const subId = req.params.id;
       
-      const eligiblePayouts = await PayoutSchedule.find({
+      const query = PayoutSchedule.find({
         user: req.user._id,
         planSubscription: subId,
         status: 'eligible'
-      }).session(session);
+      });
+      if (activeSession) query.session(activeSession);
+
+      const eligiblePayouts = await query;
 
       if (eligiblePayouts.length === 0) {
         result = { 
@@ -110,13 +119,17 @@ const collectEarnings = async (req, res, next) => {
 
       // Update statuses to paid
       const payoutIds = eligiblePayouts.map(p => p._id);
+      const updateOptions = activeSession ? { session: activeSession } : {};
       await PayoutSchedule.updateMany(
         { _id: { $in: payoutIds } },
         { $set: { status: 'paid', processedAt: new Date() } },
-        { session }
+        updateOptions
       );
 
-      const subscription = await PlanSubscription.findById(subId).session(session);
+      const subQuery = PlanSubscription.findById(subId);
+      if (activeSession) subQuery.session(activeSession);
+      const subscription = await subQuery;
+      const planName = subscription?.planSnapshot?.name || 'Subscription';
       
       // Credit wallet for each eligible payout schedule
       for (const payout of eligiblePayouts) {
@@ -124,22 +137,41 @@ const collectEarnings = async (req, res, next) => {
           req.user._id,
           payout.amount,
           'credit',
-          `Collected daily earning for ${subscription.planSnapshot.name}`,
+          `Collected daily earning for ${planName}`,
           payout._id,
           'PayoutSchedule',
-          session,
+          activeSession,
           'earning'
         );
       }
 
       result = { success: true, amount: totalAmount };
-    });
+    };
+
+    if (session) {
+      try {
+        await session.withTransaction(async () => {
+          await executeCollect(session);
+        });
+      } catch (txnError) {
+        console.warn(`[CollectEarnings] Transaction error on ${tenant}, attempting safe direct update:`, txnError.message);
+        await executeCollect(null);
+      }
+    } else {
+      await executeCollect(null);
+    }
 
     res.json(result);
   } catch (error) {
     next(new ApiError(error.message, 400));
   } finally {
-    session.endSession();
+    if (session) {
+      try {
+        await session.endSession();
+      } catch (e) {
+        // Safe to ignore
+      }
+    }
   }
 };
 

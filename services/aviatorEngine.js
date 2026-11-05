@@ -1,7 +1,6 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const AviatorHistory = require('../models/AviatorHistory');
+const { User, AviatorHistory } = require('../models');
 const crypto = require('crypto');
 
 let io;
@@ -45,8 +44,18 @@ const initAviatorSocket = (server) => {
       const token = socket.handshake.auth.token;
       if (!token) return next(new Error('Authentication error'));
       
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.user = await User.findById(decoded.id).select('-password');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_for_dev');
+      
+      // Check if client connects to an EarnBuddy socket or sent tenant handshake
+      const tenant = socket.handshake.auth.tenant || 
+                     (socket.handshake.headers['x-app-source']?.includes('earnbuddy') ? 'earnbuddy' : 'thecashly');
+      socket.tenant = tenant;
+
+      const { runWithTenant } = require('../config/tenantContext');
+      await runWithTenant(tenant, async () => {
+        socket.user = await User.findById(decoded.id).select('-password');
+      });
+
       if (!socket.user) return next(new Error('User not found'));
       
       next();
@@ -67,102 +76,109 @@ const initAviatorSocket = (server) => {
 
     // Handle bet placement via socket for instant response
     socket.on('place_bet', async (data, callback) => {
-      try {
-        if (gameState !== 'waiting') {
-          return callback({ success: false, message: 'Round already started.' });
+      const { runWithTenant } = require('../config/tenantContext');
+      runWithTenant(socket.tenant || 'thecashly', async () => {
+        try {
+          if (gameState !== 'waiting') {
+            return callback({ success: false, message: 'Round already started.' });
+          }
+
+          const { points, autoCashout } = data;
+          if (!points || points <= 0) {
+            return callback({ success: false, message: 'Invalid points.' });
+          }
+
+          const user = await User.findById(socket.user._id);
+          if (user.walletBalance < points * 100) {
+            return callback({ success: false, message: 'Insufficient balance.' });
+          }
+
+          user.walletBalance -= points * 100;
+          await user.save();
+
+          const bet = await AviatorHistory.create({
+            user: user._id,
+            points,
+            crashPoint, // current round crash point
+            status: 'pending'
+          });
+
+          const betInfo = {
+            betId: bet._id,
+            userId: user._id.toString(),
+            points,
+            autoCashout: autoCashout || null,
+            socketId: socket.id,
+            tenant: socket.tenant || 'thecashly'
+          };
+          activeBets.set(bet._id.toString(), betInfo);
+
+          // Notify other clients about the new bet (optional, for "live bets" panel)
+          io.emit('new_bet', { userId: user._id, points });
+
+          callback({ success: true, betId: bet._id, balance: user.walletBalance / 100 });
+
+        } catch (error) {
+          console.error('Place bet error:', error);
+          callback({ success: false, message: 'Server error' });
         }
-
-        const { points, autoCashout } = data;
-        if (!points || points <= 0) {
-          return callback({ success: false, message: 'Invalid points.' });
-        }
-
-        const user = await User.findById(socket.user._id);
-        if (user.walletBalance < points * 100) {
-          return callback({ success: false, message: 'Insufficient balance.' });
-        }
-
-        user.walletBalance -= points * 100;
-        await user.save();
-
-        const bet = await AviatorHistory.create({
-          user: user._id,
-          points,
-          crashPoint, // current round crash point
-          status: 'pending'
-        });
-
-        const betInfo = {
-          betId: bet._id,
-          userId: user._id.toString(),
-          points,
-          autoCashout: autoCashout || null,
-          socketId: socket.id
-        };
-        activeBets.set(bet._id.toString(), betInfo);
-
-        // Notify other clients about the new bet (optional, for "live bets" panel)
-        io.emit('new_bet', { userId: user._id, points });
-
-        callback({ success: true, betId: bet._id, balance: user.walletBalance / 100 });
-
-      } catch (error) {
-        console.error('Place bet error:', error);
-        callback({ success: false, message: 'Server error' });
-      }
+      });
     });
 
     // Handle manual cashout
     socket.on('cashout', async (data, callback) => {
-      try {
-        if (gameState !== 'flying') {
-          return callback({ success: false, message: 'Cannot cashout now.' });
+      const { runWithTenant } = require('../config/tenantContext');
+      runWithTenant(socket.tenant || 'thecashly', async () => {
+        try {
+          if (gameState !== 'flying') {
+            return callback({ success: false, message: 'Cannot cashout now.' });
+          }
+
+          const { betId } = data;
+          const betInfo = activeBets.get(betId);
+          
+          if (!betInfo || betInfo.userId !== socket.user._id.toString()) {
+            return callback({ success: false, message: 'Invalid bet.' });
+          }
+
+          // The critical section: secure the current multiplier from the server
+          const cashoutMulti = currentMultiplier;
+
+          // Verify again just in case (atomic-like check)
+          if (cashoutMulti > crashPoint || gameState === 'crashed') {
+             return callback({ success: false, message: 'Plane crashed.' });
+          }
+
+          // Prevent duplicate cashout race conditions
+          activeBets.delete(betId);
+
+          // Process win
+          const winAmount = Math.floor(betInfo.points * cashoutMulti);
+          
+          const user = await User.findById(socket.user._id);
+          // Winnings also go to walletBalance, or earningBalance? I will add to walletBalance to keep it as a unified playable balance.
+          user.walletBalance += winAmount * 100;
+          await user.save();
+
+          await AviatorHistory.findByIdAndUpdate(betId, {
+            status: 'won',
+            cashedOut: true,
+            cashoutMultiplier: cashoutMulti,
+            winAmount
+          });
+
+          callback({ 
+            success: true, 
+            winAmount, 
+            multiplier: cashoutMulti, 
+            balance: user.walletBalance / 100 
+          });
+
+        } catch (error) {
+          console.error('Cashout error:', error);
+          callback({ success: false, message: 'Server error' });
         }
-
-        const { betId } = data;
-        const betInfo = activeBets.get(betId);
-        
-        if (!betInfo || betInfo.userId !== socket.user._id.toString()) {
-          return callback({ success: false, message: 'Invalid bet.' });
-        }
-
-        // The critical section: secure the current multiplier from the server
-        const cashoutMulti = currentMultiplier;
-
-        // Verify again just in case (atomic-like check)
-        if (cashoutMulti > crashPoint || gameState === 'crashed') {
-           return callback({ success: false, message: 'Plane crashed.' });
-        }
-
-        // Prevent duplicate cashout race conditions
-        activeBets.delete(betId);
-
-        // Process win
-        const winAmount = Math.floor(betInfo.points * cashoutMulti);
-        
-        const user = await User.findById(socket.user._id);
-        // Winnings also go to walletBalance, or earningBalance? I will add to walletBalance to keep it as a unified playable balance.
-        user.walletBalance += winAmount * 100;
-        await user.save();
-
-        await AviatorHistory.findByIdAndUpdate(betId, {
-          status: 'won',
-          cashedOut: true,
-          cashoutMultiplier: cashoutMulti,
-          winAmount
-        });
-
-        callback({ 
-          success: true, 
-          winAmount, 
-          multiplier: cashoutMulti, 
-          balance: user.walletBalance / 100 
-        });
-
-      } catch (error) {
-        console.error('Cashout error:', error);
-        callback({ success: false, message: 'Server error' });
-      }
+      });
     });
   });
 
@@ -253,6 +269,7 @@ const takeOff = () => {
 };
 
 const processAutoCashouts = async () => {
+  const { runWithTenant } = require('../config/tenantContext');
   // Iterate through active bets and see if any hit their autoCashout target
   for (const [betId, betInfo] of activeBets.entries()) {
     if (betInfo.autoCashout && currentMultiplier >= betInfo.autoCashout) {
@@ -261,24 +278,26 @@ const processAutoCashouts = async () => {
        
        // Perform cashout
        try {
-         const winAmount = Math.floor(betInfo.points * betInfo.autoCashout);
-         const user = await User.findById(betInfo.userId);
-         user.walletBalance += winAmount * 100;
-         await user.save();
+         await runWithTenant(betInfo.tenant || 'thecashly', async () => {
+           const winAmount = Math.floor(betInfo.points * betInfo.autoCashout);
+           const user = await User.findById(betInfo.userId);
+           user.walletBalance += winAmount * 100;
+           await user.save();
 
-         await AviatorHistory.findByIdAndUpdate(betId, {
-           status: 'won',
-           cashedOut: true,
-           cashoutMultiplier: betInfo.autoCashout,
-           winAmount
-         });
-         
-         // Notify the specific user if possible
-         io.to(betInfo.socketId).emit('auto_cashed_out', {
-           betId,
-           winAmount,
-           multiplier: betInfo.autoCashout,
-           balance: user.walletBalance / 100
+           await AviatorHistory.findByIdAndUpdate(betId, {
+             status: 'won',
+             cashedOut: true,
+             cashoutMultiplier: betInfo.autoCashout,
+             winAmount
+           });
+           
+           // Notify the specific user if possible
+           io.to(betInfo.socketId).emit('auto_cashed_out', {
+             betId,
+             winAmount,
+             multiplier: betInfo.autoCashout,
+             balance: user.walletBalance / 100
+           });
          });
        } catch (err) {
          console.error('Auto cashout error:', err);
@@ -289,19 +308,29 @@ const processAutoCashouts = async () => {
 };
 
 const crashPlane = async () => {
+  const { runWithTenant } = require('../config/tenantContext');
   gameState = 'crashed';
   currentMultiplier = crashPoint;
   
   io.emit('game_state', { state: gameState, multiplier: currentMultiplier, crashPoint });
   
-  // Settle all remaining active bets as lost
-  const lostBetIds = Array.from(activeBets.keys());
-  
-  if (lostBetIds.length > 0) {
-    await AviatorHistory.updateMany(
-      { _id: { $in: lostBetIds } },
-      { $set: { status: 'lost', crashPoint } }
-    );
+  // Group lost bets by tenant
+  const tenantGroups = new Map();
+  for (const [betId, betInfo] of activeBets.entries()) {
+    const t = betInfo.tenant || 'thecashly';
+    if (!tenantGroups.has(t)) tenantGroups.set(t, []);
+    tenantGroups.get(t).push(betId);
+  }
+
+  for (const [tenant, betIds] of tenantGroups.entries()) {
+    if (betIds.length > 0) {
+      await runWithTenant(tenant, async () => {
+        await AviatorHistory.updateMany(
+          { _id: { $in: betIds } },
+          { $set: { status: 'lost', crashPoint } }
+        );
+      });
+    }
   }
   
   activeBets.clear();

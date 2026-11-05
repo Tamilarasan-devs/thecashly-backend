@@ -1,5 +1,4 @@
-const AviatorHistory = require('../models/AviatorHistory');
-const User = require('../models/User');
+const { AviatorHistory, User } = require('../models');
 
 const playAviator = async (req, res, next) => {
   try {

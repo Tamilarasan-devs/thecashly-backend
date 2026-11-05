@@ -1,7 +1,5 @@
 const cron = require('node-cron');
-const ColorRound = require('../models/ColorRound');
-const ColorPrediction = require('../models/ColorPrediction');
-const User = require('../models/User');
+const { ColorRound, ColorPrediction, User } = require('../models');
 
 const settleGameRound = async () => {
   try {

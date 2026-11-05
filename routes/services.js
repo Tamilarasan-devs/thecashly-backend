@@ -8,7 +8,9 @@ const {
   replyToTicket 
 } = require('../controllers/serviceController');
 const { protect } = require('../middleware/auth');
+const { getPublicReferralSetting } = require('../controllers/referralSettingController');
 
+router.get('/referral-settings', getPublicReferralSetting);
 router.get('/history', protect, getTransactionHistory);
 router.get('/schedule', protect, getPayoutSchedule);
 router.get('/tickets', protect, getSupportTickets);

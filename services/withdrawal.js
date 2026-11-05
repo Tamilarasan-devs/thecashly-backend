@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const { Withdrawal, User } = require('../models');
 const { recordLedgerEntry } = require('./ledger');
+const { getActiveTenant } = require('../config/tenantContext');
+const { startTenantSession } = require('../config/dbManager');
 
 function validateBankDetails(bankDetails) {
   const { accountHolderName, bankName, accountNumber, ifscCode, branchName, upiId } = bankDetails || {};
@@ -58,68 +60,98 @@ async function requestWithdrawal(userId, amount, bankDetails = null) {
     throw new Error('Minimum withdrawal amount is ₹200');
   }
 
-  const session = await mongoose.startSession();
+  const tenant = getActiveTenant();
+  const session = await startTenantSession(tenant);
   let withdrawal;
 
-  try {
-    await session.withTransaction(async () => {
-      const user = await User.findById(userId).session(session);
-      if (!user) throw new Error('User not found');
+  const executeWithdrawal = async (activeSession) => {
+    const userQuery = User.findById(userId);
+    if (activeSession) userQuery.session(activeSession);
+    const user = await userQuery;
+    if (!user) throw new Error('User not found');
 
-      // If bank details were provided with the request, validate and persist them
-      if (bankDetails) {
-        const validated = validateBankDetails(bankDetails);
-        user.payoutDetails = validated;
-        await user.save({ session });
+    // If bank details were provided with the request, validate and persist them
+    if (bankDetails) {
+      const validated = validateBankDetails(bankDetails);
+      user.payoutDetails = validated;
+      if (activeSession) {
+        await user.save({ session: activeSession });
+      } else {
+        await user.save();
       }
+    }
 
-      // Check if user has complete payout details
-      const payout = user.payoutDetails;
-      if (
-        !payout ||
-        !payout.accountNumber ||
-        !payout.accountHolderName ||
-        !payout.bankName ||
-        !payout.ifscCode ||
-        !payout.branchName
-      ) {
-        throw new Error('Please provide complete bank details (Account Holder Name, Bank Name, Account Number, IFSC Code, and Branch Name) before requesting a withdrawal.');
+    // Check if user has complete payout details
+    const payout = user.payoutDetails;
+    if (
+      !payout ||
+      !payout.accountNumber ||
+      !payout.accountHolderName ||
+      !payout.bankName ||
+      !payout.ifscCode ||
+      !payout.branchName
+    ) {
+      throw new Error('Please provide complete bank details (Account Holder Name, Bank Name, Account Number, IFSC Code, and Branch Name) before requesting a withdrawal.');
+    }
+
+    if ((user.earningBalance || 0) < amount) {
+      throw new Error('Insufficient earning balance for withdrawal');
+    }
+
+    // Snapshot the payout details
+    withdrawal = new Withdrawal({
+      user: userId,
+      amount,
+      status: 'requested',
+      payoutDetailsSnapshot: {
+        accountHolderName: payout.accountHolderName,
+        bankName: payout.bankName,
+        accountNumber: payout.accountNumber,
+        ifscCode: payout.ifscCode,
+        branchName: payout.branchName,
+        upiId: payout.upiId || ''
       }
-
-      if ((user.earningBalance || 0) < amount) {
-        throw new Error('Insufficient earning balance for withdrawal');
-      }
-
-      // Snapshot the payout details
-      withdrawal = new Withdrawal({
-        user: userId,
-        amount,
-        status: 'requested',
-        payoutDetailsSnapshot: {
-          accountHolderName: payout.accountHolderName,
-          bankName: payout.bankName,
-          accountNumber: payout.accountNumber,
-          ifscCode: payout.ifscCode,
-          branchName: payout.branchName,
-          upiId: payout.upiId || ''
-        }
-      });
-      await withdrawal.save({ session });
-
-      // Debit the user's earning wallet
-      await recordLedgerEntry(
-        userId,
-        -amount,
-        'withdrawal_request',
-        `Withdrawal request for ₹${(amount / 100).toFixed(2)} to ${payout.bankName} (A/C: ${payout.accountNumber})`,
-        withdrawal._id,
-        'Withdrawal',
-        session,
-        'earning'
-      );
     });
+    if (activeSession) {
+      await withdrawal.save({ session: activeSession });
+    } else {
+      await withdrawal.save();
+    }
+
+    // Debit the user's earning wallet
+    await recordLedgerEntry(
+      userId,
+      -amount,
+      'withdrawal_request',
+      `Withdrawal request for ₹${(amount / 100).toFixed(2)} to ${payout.bankName} (A/C: ${payout.accountNumber})`,
+      withdrawal._id,
+      'Withdrawal',
+      activeSession,
+      'earning'
+    );
+  };
+
+  try {
+    if (session) {
+      try {
+        await session.withTransaction(async () => {
+          await executeWithdrawal(session);
+        });
+      } catch (txnErr) {
+        console.warn(`[Withdrawal] Transaction error on ${tenant}, attempting safe direct update:`, txnErr.message);
+        await executeWithdrawal(null);
+      }
+    } else {
+      await executeWithdrawal(null);
+    }
   } finally {
-    session.endSession();
+    if (session) {
+      try {
+        await session.endSession();
+      } catch (e) {
+        // Safe to ignore
+      }
+    }
   }
 
   return withdrawal;

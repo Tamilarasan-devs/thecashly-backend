@@ -11,6 +11,10 @@ const { startColorGameJob } = require('./jobs/colorGameJob');
 const path = require('path');
 const zlib = require('zlib');
 
+const { tenantMiddleware } = require('./middleware/tenantMiddleware');
+const { initDatabases } = require('./config/dbManager');
+const { runWithTenant } = require('./config/tenantContext');
+
 const app = express();
 
 // Allowed Origins for CORS
@@ -18,6 +22,8 @@ const allowedOrigins = [
   'https://thecashly-gamestore.vercel.app',
   'https://thecashly.in',
   'https://www.thecashly.in',
+  'https://earnbuddy.in',
+  'https://www.earnbuddy.in',
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/
 ];
@@ -81,6 +87,12 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { maxAge: '7
 
 // Routes placeholder
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+
+// Dedicated Separate EarnBuddy API Routes
+app.use('/api/earnbuddy', tenantMiddleware('earnbuddy'), require('./routes/earnbuddyRoutes'));
+
+// Default / TheCashly API Routes (with automatic tenant detection based on header/origin/URL)
+app.use('/api', tenantMiddleware());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/plans', require('./routes/plans'));
 app.use('/api/payments', require('./routes/payments'));
@@ -89,14 +101,17 @@ app.use('/api/topups', require('./routes/topUps'));
 app.use('/api/services', require('./routes/services'));
 app.use('/api/payment-settings', require('./routes/paymentSettings'));
 app.use('/api/admin', require('./routes/adminTools'));
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/colorgame', require('./routes/colorGame'));
 app.use('/api/aviator', require('./routes/aviator'));
 
-// Initialize Cron Jobs
+// Initialize Cron Jobs for both databases
 // Run daily at midnight UTC
-cron.schedule('0 0 * * *', () => {
-  console.log('[CRON] Running daily payout processor...');
-  processPayouts();
+cron.schedule('0 0 * * *', async () => {
+  console.log('[CRON] Running daily payout processor for TheCashly...');
+  await runWithTenant('thecashly', () => processPayouts());
+  console.log('[CRON] Running daily payout processor for EarnBuddy...');
+  await runWithTenant('earnbuddy', () => processPayouts());
 });
 
 startColorGameJob();
@@ -108,47 +123,42 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   try {
-    let mongoUri = process.env.MONGO_URI;
-    
-    // For local dev without a real Mongo URI, use Memory Server
-    if (!mongoUri || mongoUri === 'memory') {
-      const mongod = await MongoMemoryServer.create();
-      mongoUri = mongod.getUri();
-      console.log(`[DB] Using MongoDB Memory Server: ${mongoUri}`);
-    }
+    // Initialize both database connections (TheCashly + EarnBuddy)
+    await initDatabases();
+    console.log('[DB] Multi-tenant databases ready (TheCashly & EarnBuddy)');
 
-    await mongoose.connect(mongoUri, {
-      maxPoolSize: 15,
-      minPoolSize: 2,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000
-    });
-    console.log('[DB] Connected to MongoDB with connection pooling');
-
-    // Ensure all existing users have unique referral codes (non-blocking)
+    // Ensure all existing users have unique referral codes for both tenants (non-blocking)
     const { User } = require('./models');
-    User.find({
-      $or: [
-        { referralCode: { $exists: false } },
-        { referralCode: null },
-        { referralCode: '' }
-      ]
-    })
-      .select('_id')
-      .then(async (usersWithoutRef) => {
-        if (usersWithoutRef.length > 0) {
-          const { generateUniqueReferralCode } = require('./utils/referral');
-          for (const u of usersWithoutRef) {
-            const userDoc = await User.findById(u._id);
-            if (userDoc && !userDoc.referralCode) {
-              userDoc.referralCode = await generateUniqueReferralCode(User);
-              await userDoc.save();
+    const backfillReferralsForTenant = async (tenantName) => {
+      await runWithTenant(tenantName, async () => {
+        try {
+          const usersWithoutRef = await User.find({
+            $or: [
+              { referralCode: { $exists: false } },
+              { referralCode: null },
+              { referralCode: '' }
+            ]
+          }).select('_id');
+
+          if (usersWithoutRef.length > 0) {
+            const { generateUniqueReferralCode } = require('./utils/referral');
+            for (const u of usersWithoutRef) {
+              const userDoc = await User.findById(u._id);
+              if (userDoc && !userDoc.referralCode) {
+                userDoc.referralCode = await generateUniqueReferralCode(User);
+                await userDoc.save();
+              }
             }
+            console.log(`[Referral:${tenantName}] Backfilled referral codes for ${usersWithoutRef.length} existing user(s).`);
           }
-          console.log(`[Referral] Backfilled referral codes for ${usersWithoutRef.length} existing user(s).`);
+        } catch (refErr) {
+          console.error(`[Referral Backfill Warning:${tenantName}]`, refErr.message);
         }
-      })
-      .catch((refErr) => console.error('[Referral Backfill Warning]', refErr));
+      });
+    };
+
+    backfillReferralsForTenant('thecashly');
+    backfillReferralsForTenant('earnbuddy');
 
     const http = require('http');
     const server = http.createServer(app);
@@ -160,7 +170,8 @@ async function startServer() {
     server.listen(PORT, () => {
       console.log(`[Server] Running on port ${PORT}`);
       // Run payout processor in background on startup to catch up on any missed cron jobs
-      processPayouts().catch(err => console.error('[Startup Payout Error]', err));
+      runWithTenant('thecashly', () => processPayouts()).catch(err => console.error('[Startup Payout Error:thecashly]', err));
+      runWithTenant('earnbuddy', () => processPayouts()).catch(err => console.error('[Startup Payout Error:earnbuddy]', err));
     });
   } catch (error) {
     console.error('[Startup Error]', error);

@@ -197,8 +197,30 @@ const getReferralStats = async (req, res, next) => {
       .select('name email createdAt')
       .sort('-createdAt');
 
-    // Fetch any manual rewards credited for these referrals
-    const { ReferralReward } = require('../models');
+    const { ReferralReward, ReferralSetting, TopUp } = require('../models');
+    let dynamicReferrerBonus = REFERRAL_BONUS_REFERRER;
+    let dynamicRefereeBonus = REFERRAL_BONUS_REFEREE;
+    try {
+      const refSetting = await ReferralSetting.findOne().sort('-updatedAt');
+      if (refSetting) {
+        if (refSetting.referrerBonusRupees !== undefined) {
+          dynamicReferrerBonus = Math.round(refSetting.referrerBonusRupees * 100);
+        }
+        if (refSetting.refereeBonusRupees !== undefined) {
+          dynamicRefereeBonus = Math.round(refSetting.refereeBonusRupees * 100);
+        }
+      }
+    } catch (sErr) {
+      // Fallback to defaults
+    }
+
+    // Check if the current user (referrer) has made at least one verified deposit
+    const userDepositCount = await TopUp.countDocuments({
+      user: userId,
+      status: 'verified'
+    });
+    const isEligibleToEarn = userDepositCount > 0;
+
     const rewards = await ReferralReward.find({ referrer: userId }).lean();
     const rewardsMap = new Map();
     rewards.forEach(rw => {
@@ -218,6 +240,17 @@ const getReferralStats = async (req, res, next) => {
       const isRewardPaid = Boolean(rewardInfo && rewardInfo.referrerRewardAmount > 0);
       const rewardAmount = isRewardPaid ? rewardInfo.referrerRewardAmount : 0;
 
+      let status = 'Registered (No Deposit)';
+      if (isRewardPaid) {
+        status = 'Reward Credited';
+      } else if (hasDeposited) {
+        if (!isEligibleToEarn) {
+          status = 'Deposit Required by You to Unlock';
+        } else {
+          status = 'Deposit Under Review';
+        }
+      }
+
       return {
         _id: r._id,
         name: r.name,
@@ -225,7 +258,7 @@ const getReferralStats = async (req, res, next) => {
         createdAt: r.createdAt,
         hasDeposited,
         isRewardPaid,
-        status: isRewardPaid ? 'Reward Credited' : (hasDeposited ? 'Deposit Under Review' : 'Registered (No Deposit)'),
+        status,
         rewardAmount: rewardAmount || 0
       };
     });
@@ -234,10 +267,12 @@ const getReferralStats = async (req, res, next) => {
       success: true,
       data: {
         referralCode: user.referralCode,
+        isEligibleToEarn,
+        hasDeposited: isEligibleToEarn,
         totalReferrals: referrals.length,
         totalEarnings: user.referralEarnings || 0,
-        rewardPerReferral: REFERRAL_BONUS_REFERRER,
-        refereeBonus: REFERRAL_BONUS_REFEREE,
+        rewardPerReferral: dynamicReferrerBonus,
+        refereeBonus: dynamicRefereeBonus,
         referrals: formattedReferrals
       }
     });

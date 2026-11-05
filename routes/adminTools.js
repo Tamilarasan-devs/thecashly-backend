@@ -106,13 +106,23 @@ const {
   getAdminReferralRewards,
   sendReferrerReward,
   sendReferredUserReward,
+  approveBothReferralRewards,
   rejectReferralReward
 } = require('../controllers/referralAdminController');
+const {
+  getAdminReferralSetting,
+  updateAdminReferralSetting,
+  getPublicReferralSetting
+} = require('../controllers/referralSettingController');
 
-// Admin: Referral Rewards Management
+// Admin: Referral Amount Configuration & Rewards Management
+router.get('/referral-settings', protect, authorize('admin'), getAdminReferralSetting);
+router.put('/referral-settings', protect, authorize('admin'), updateAdminReferralSetting);
+router.post('/referral-settings', protect, authorize('admin'), updateAdminReferralSetting);
 router.get('/referrals', protect, authorize('admin'), getAdminReferralRewards);
 router.post('/referrals/:id/send-referrer', protect, authorize('admin'), sendReferrerReward);
 router.post('/referrals/:id/send-referred-user', protect, authorize('admin'), sendReferredUserReward);
+router.post('/referrals/:id/approve-both', protect, authorize('admin'), approveBothReferralRewards);
 router.post('/referrals/:id/reject', protect, authorize('admin'), rejectReferralReward);
 
 // Admin: Get all top ups

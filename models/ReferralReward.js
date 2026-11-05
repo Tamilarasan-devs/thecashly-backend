@@ -17,6 +17,10 @@ const referralRewardSchema = new mongoose.Schema({
   referrerRewardAmount: { type: Number, default: 0 }, // in paise
   referredUserRewardAmount: { type: Number, default: 0 }, // in paise
   
+  // Qualification details
+  referrerEligible: { type: Boolean, default: true },
+  referrerIneligibleReason: { type: String, default: '' },
+
   // Admin notes/references
   referrerNote: { type: String },
   referredUserNote: { type: String },

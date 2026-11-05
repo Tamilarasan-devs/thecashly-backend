@@ -1,6 +1,4 @@
-const ColorRound = require('../models/ColorRound');
-const ColorPrediction = require('../models/ColorPrediction');
-const User = require('../models/User');
+const { ColorRound, ColorPrediction, User } = require('../models');
 
 const getCurrentRound = async (req, res, next) => {
   try {
