@@ -19,6 +19,21 @@ async function recordLedgerEntry(userId, amount, type, description, referenceId,
       throw new Error('User not found');
     }
 
+    // Idempotency check: prevent duplicate ledger entries for the same reference event
+    if (referenceId && referenceModel) {
+      const existingQuery = WalletLedgerEntry.findOne({
+        user: userId,
+        referenceId,
+        referenceModel,
+        type
+      });
+      if (dbSession) existingQuery.session(dbSession);
+      const existingEntry = await existingQuery;
+      if (existingEntry) {
+        return { user, entry: existingEntry, duplicate: true };
+      }
+    }
+
     // Amount can be negative for debits (withdrawals)
     let newBalance;
     if (balanceType === 'earning') {

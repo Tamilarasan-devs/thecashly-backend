@@ -3,6 +3,7 @@ const { Withdrawal, User } = require('../models');
 const { recordLedgerEntry } = require('./ledger');
 const { getActiveTenant } = require('../config/tenantContext');
 const { startTenantSession } = require('../config/dbManager');
+const { logAuditEvent } = require('./auditLogger');
 
 function validateBankDetails(bankDetails) {
   const { accountHolderName, bankName, accountNumber, ifscCode, branchName, upiId } = bankDetails || {};
@@ -158,62 +159,130 @@ async function requestWithdrawal(userId, amount, bankDetails = null) {
 }
 
 async function approveWithdrawal(withdrawalId, adminId, paymentReference = '') {
-  const session = await mongoose.startSession();
+  const tenant = getActiveTenant();
+  const session = await startTenantSession(tenant);
   let withdrawal;
 
-  try {
-    await session.withTransaction(async () => {
-      withdrawal = await Withdrawal.findById(withdrawalId).session(session);
-      if (!withdrawal) throw new Error('Withdrawal not found');
-      if (withdrawal.status !== 'requested' && withdrawal.status !== 'processing') {
-        throw new Error('Withdrawal is not in a valid state for approval');
-      }
+  const executeApprove = async (activeSession) => {
+    const q = Withdrawal.findById(withdrawalId);
+    if (activeSession) q.session(activeSession);
+    withdrawal = await q;
 
-      withdrawal.status = 'paid';
-      withdrawal.paymentReference = paymentReference || '';
-      withdrawal.processedAt = new Date();
-      // Audit log should ideally be inserted here too
-      
-      await withdrawal.save({ session });
+    if (!withdrawal) throw new Error('Withdrawal not found');
+    if (withdrawal.status !== 'requested' && withdrawal.status !== 'processing') {
+      throw new Error('Withdrawal is not in a valid state for approval');
+    }
+
+    withdrawal.status = 'paid';
+    withdrawal.paymentReference = paymentReference || '';
+    withdrawal.processedAt = new Date();
+
+    if (activeSession) {
+      await withdrawal.save({ session: activeSession });
+    } else {
+      await withdrawal.save();
+    }
+
+    // Persist audit log
+    await logAuditEvent({
+      adminUser: adminId,
+      action: 'WITHDRAWAL_APPROVED',
+      targetModel: 'Withdrawal',
+      targetId: withdrawal._id,
+      changes: { status: 'paid', paymentReference },
+      reason: 'Admin approved payout'
     });
+  };
+
+  try {
+    if (session) {
+      try {
+        await session.withTransaction(async () => {
+          await executeApprove(session);
+        });
+      } catch (txnErr) {
+        await executeApprove(null);
+      }
+    } else {
+      await executeApprove(null);
+    }
   } finally {
-    session.endSession();
+    if (session) {
+      try {
+        await session.endSession();
+      } catch (e) {}
+    }
   }
 
   return withdrawal;
 }
 
 async function rejectWithdrawal(withdrawalId, adminId, reason) {
-  const session = await mongoose.startSession();
+  const tenant = getActiveTenant();
+  const session = await startTenantSession(tenant);
   let withdrawal;
 
-  try {
-    await session.withTransaction(async () => {
-      withdrawal = await Withdrawal.findById(withdrawalId).session(session);
-      if (!withdrawal) throw new Error('Withdrawal not found');
-      if (withdrawal.status !== 'requested') {
-        throw new Error('Withdrawal already processed');
-      }
+  const executeReject = async (activeSession) => {
+    const q = Withdrawal.findById(withdrawalId);
+    if (activeSession) q.session(activeSession);
+    withdrawal = await q;
 
-      withdrawal.status = 'rejected';
-      withdrawal.adminReason = reason;
-      withdrawal.processedAt = new Date();
-      await withdrawal.save({ session });
+    if (!withdrawal) throw new Error('Withdrawal not found');
+    if (withdrawal.status !== 'requested') {
+      throw new Error('Withdrawal already processed');
+    }
 
-      // Refund the wallet
-      await recordLedgerEntry(
-        withdrawal.user,
-        withdrawal.amount, // Credit back
-        'withdrawal_refund',
-        `Refund for rejected withdrawal: ${reason}`,
-        new mongoose.Types.ObjectId(),
-        'Withdrawal',
-        session,
-        'earning'
-      );
+    withdrawal.status = 'rejected';
+    withdrawal.adminReason = reason;
+    withdrawal.processedAt = new Date();
+
+    if (activeSession) {
+      await withdrawal.save({ session: activeSession });
+    } else {
+      await withdrawal.save();
+    }
+
+    // Refund the wallet balance
+    await recordLedgerEntry(
+      withdrawal.user,
+      withdrawal.amount, // Credit back
+      'withdrawal_refund',
+      `Refund for rejected withdrawal: ${reason}`,
+      new mongoose.Types.ObjectId(),
+      'Withdrawal',
+      activeSession,
+      'earning'
+    );
+
+    // Persist audit log
+    await logAuditEvent({
+      adminUser: adminId,
+      action: 'WITHDRAWAL_REJECTED',
+      targetModel: 'Withdrawal',
+      targetId: withdrawal._id,
+      changes: { status: 'rejected', adminReason: reason },
+      reason
     });
+  };
+
+  try {
+    if (session) {
+      try {
+        await session.withTransaction(async () => {
+          await executeReject(session);
+        });
+      } catch (txnErr) {
+        await executeReject(null);
+      }
+    } else {
+      await executeReject(null);
+    }
   } finally {
-    session.endSession();
+    if (session) {
+      try {
+        await session.endSession();
+      } catch (e) {}
+    }
   }
 
   return withdrawal;

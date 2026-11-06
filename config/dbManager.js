@@ -24,17 +24,15 @@ const initDatabases = async () => {
     let thecashlyUri = process.env.MONGO_URI;
     let earnbuddyUri = process.env.EARNBUDDY_MONGO_URI;
 
-    // Fallback for memory testing if specified or missing
+    // Fail immediately if MONGO_URI is missing - ephemeral in-memory databases are disabled to protect user data
     if (!thecashlyUri || thecashlyUri === 'memory') {
-      memServerTheCashly = await MongoMemoryServer.create();
-      thecashlyUri = memServerTheCashly.getUri();
-      console.log(`[DB:TheCashly] Using in-memory Mongo: ${thecashlyUri}`);
-    }
-
-    if (!earnbuddyUri || earnbuddyUri === 'memory') {
-      memServerEarnBuddy = await MongoMemoryServer.create();
-      earnbuddyUri = memServerEarnBuddy.getUri();
-      console.log(`[DB:EarnBuddy] Using in-memory Mongo: ${earnbuddyUri}`);
+      if (process.env.NODE_ENV === 'test' && process.env.ALLOW_IN_MEMORY_DB === 'true') {
+        memServerTheCashly = await MongoMemoryServer.create();
+        thecashlyUri = memServerTheCashly.getUri();
+        console.log(`[DB:TheCashly] Using in-memory Mongo (test mode only): ${thecashlyUri}`);
+      } else {
+        throw new Error('FATAL: MONGO_URI environment variable is missing or set to "memory". In-memory database fallback is disabled to prevent catastrophic data loss.');
+      }
     }
 
     // Connect primary (TheCashly)
@@ -43,16 +41,17 @@ const initDatabases = async () => {
     console.log(`[DB] Connected to TheCashly database (${connections.thecashly.name || 'default'})`);
 
     // Connect secondary (EarnBuddy)
-    console.log('[DB] Connecting to EarnBuddy database...');
-    try {
-      connections.earnbuddy = await createConnectionWithPool(earnbuddyUri, 'earnbuddy');
-      console.log(`[DB] Connected to EarnBuddy database (${connections.earnbuddy.name || 'earnbuddy'})`);
-    } catch (err) {
-      console.error('[DB] Failed to connect to EarnBuddy remote MongoDB. Falling back to local in-memory DB:', err.message);
-      memServerEarnBuddy = await MongoMemoryServer.create();
-      const fallbackUri = memServerEarnBuddy.getUri();
-      connections.earnbuddy = await createConnectionWithPool(fallbackUri, 'earnbuddy');
-      console.log(`[DB] Connected to EarnBuddy fallback in-memory database.`);
+    if (earnbuddyUri && earnbuddyUri !== 'memory') {
+      console.log('[DB] Connecting to EarnBuddy database...');
+      try {
+        connections.earnbuddy = await createConnectionWithPool(earnbuddyUri, 'earnbuddy');
+        console.log(`[DB] Connected to EarnBuddy database (${connections.earnbuddy.name || 'earnbuddy'})`);
+      } catch (err) {
+        console.error('[DB] Failed to connect to EarnBuddy remote MongoDB:', err.message);
+        throw new Error(`FATAL: Failed to connect to EarnBuddy remote database: ${err.message}`);
+      }
+    } else {
+      console.log('[DB] EARNBUDDY_MONGO_URI not configured. EarnBuddy requests will use primary database connection.');
     }
 
     // Also connect mongoose default connection to TheCashly for backwards compatibility with any direct mongoose calls

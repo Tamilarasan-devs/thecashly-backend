@@ -11,8 +11,9 @@ const {
   getManualWithdrawalStatements
 } = require('../controllers/withdrawalController');
 const { protect, authorize } = require('../middleware/auth');
+const { idempotencyMiddleware } = require('../services/idempotency');
 
-router.post('/request', protect, createWithdrawalRequest);
+router.post('/request', protect, idempotencyMiddleware(), createWithdrawalRequest);
 router.put('/bank-details', protect, updateUserBankDetailsController);
 router.get('/', protect, getUserWithdrawals);
 

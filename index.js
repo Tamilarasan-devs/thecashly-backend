@@ -10,12 +10,20 @@ const { startColorGameJob } = require('./jobs/colorGameJob');
 
 const path = require('path');
 const zlib = require('zlib');
+const helmet = require('helmet');
+const { apiLimiter, authLimiter, transactionLimiter } = require('./middleware/rateLimiter');
 
 const { tenantMiddleware } = require('./middleware/tenantMiddleware');
 const { initDatabases } = require('./config/dbManager');
 const { runWithTenant } = require('./config/tenantContext');
 
 const app = express();
+
+// Secure HTTP response headers
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
 
 // Allowed Origins for CORS
 const allowedOrigins = [
@@ -82,9 +90,27 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { maxAge: '7d', etag: true }));
+
+// Rate Limiting
+app.use('/api', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/earnbuddy/auth/login', authLimiter);
+app.use('/api/earnbuddy/auth/register', authLimiter);
+app.use('/api/topups', transactionLimiter);
+app.use('/api/withdrawals', transactionLimiter);
+app.use('/api/payments/purchase', transactionLimiter);
+app.use('/api/earnbuddy/topups', transactionLimiter);
+app.use('/api/earnbuddy/withdrawals', transactionLimiter);
+app.use('/api/earnbuddy/payments/purchase', transactionLimiter);
 
 // Routes placeholder
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
@@ -124,6 +150,12 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   try {
+    // Validate critical environment secrets
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback_secret_for_dev') {
+      console.error('[FATAL] JWT_SECRET environment variable is missing or insecure. Aborting server startup.');
+      process.exit(1);
+    }
+
     // Initialize both database connections (TheCashly + EarnBuddy)
     await initDatabases();
     console.log('[DB] Multi-tenant databases ready (TheCashly & EarnBuddy)');

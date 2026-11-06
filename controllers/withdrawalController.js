@@ -50,11 +50,32 @@ const createWithdrawalRequest = async (req, res, next) => {
 // @access  Private
 const getUserWithdrawals = async (req, res, next) => {
   try {
-    const withdrawals = await Withdrawal.find({ user: req.user._id })
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const filter = { user: req.user._id };
+    if (req.query.status) filter.status = req.query.status;
+
+    const total = await Withdrawal.countDocuments(filter);
+    const withdrawals = await Withdrawal.find(filter)
       .sort('-createdAt')
-      .limit(100)
+      .skip(skip)
+      .limit(limit)
       .lean();
-    res.json({ success: true, data: withdrawals });
+
+    res.json({
+      success: true,
+      data: withdrawals,
+      pagination: {
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+        limit,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -65,12 +86,33 @@ const getUserWithdrawals = async (req, res, next) => {
 // @access  Private/Admin
 const getAllWithdrawals = async (req, res, next) => {
   try {
-    const withdrawals = await Withdrawal.find({})
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+
+    const total = await Withdrawal.countDocuments(filter);
+    const withdrawals = await Withdrawal.find(filter)
       .populate('user', 'name phone email')
       .sort('-createdAt')
-      .limit(200)
+      .skip(skip)
+      .limit(limit)
       .lean();
-    res.json({ success: true, data: withdrawals });
+
+    res.json({
+      success: true,
+      data: withdrawals,
+      pagination: {
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+        limit,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
     next(error);
   }

@@ -44,10 +44,14 @@ const initAviatorSocket = (server) => {
       const token = socket.handshake.auth.token;
       if (!token) return next(new Error('Authentication error'));
       
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_for_dev');
+      if (!process.env.JWT_SECRET) {
+        return next(new Error('Server configuration error: JWT_SECRET is not set'));
+      }
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      // Check if client connects to an EarnBuddy socket or sent tenant handshake
-      const tenant = socket.handshake.auth.tenant || 
+      // Check if token or client connects to an EarnBuddy socket or sent tenant handshake
+      const tenant = decoded.tenant ||
+                     socket.handshake.auth.tenant || 
                      (socket.handshake.headers['x-app-source']?.includes('earnbuddy') ? 'earnbuddy' : 'thecashly');
       socket.tenant = tenant;
 

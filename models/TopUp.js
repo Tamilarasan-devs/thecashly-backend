@@ -5,7 +5,7 @@ const topUpSchema = new mongoose.Schema({
   amount: { type: Number, required: true }, // In paise
   status: { type: String, enum: ['pending', 'verified', 'failed'], default: 'pending' },
   gatewayReference: { type: String, unique: true, sparse: true },
-  utr: { type: String, trim: true },
+  utr: { type: String, trim: true, uppercase: true },
   screenshotUrl: { type: String },
   rejectionReason: { type: String },
   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -16,6 +16,6 @@ const topUpSchema = new mongoose.Schema({
 
 topUpSchema.index({ user: 1, createdAt: -1 });
 topUpSchema.index({ status: 1, createdAt: -1 });
-topUpSchema.index({ utr: 1 }, { sparse: true });
+topUpSchema.index({ utr: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('TopUp', topUpSchema);

@@ -175,8 +175,109 @@ const collectEarnings = async (req, res, next) => {
   }
 };
 
+// @desc    Handle incoming payment gateway webhook with HMAC verification
+// @route   POST /api/payments/webhook
+// @access  Public (Signature-protected)
+const { processGatewayWebhook, verifyPaymentSignature } = require('../services/paymentGateway');
+const { TopUp } = require('../models');
+const { logAuditEvent } = require('../services/auditLogger');
+
+const handleWebhook = async (req, res, next) => {
+  try {
+    const result = await processGatewayWebhook({
+      rawBody: req.rawBody,
+      headers: req.headers,
+      body: req.body,
+      req
+    });
+
+    if (!result.success) {
+      return res.status(result.status || 400).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('[Payment Webhook Error]', error);
+    res.status(500).json({ success: false, error: 'Internal webhook handling error' });
+  }
+};
+
+// @desc    Verify client-side payment completion signature (Razorpay/Gateway)
+// @route   POST /api/payments/verify-payment
+// @access  Private
+const verifyPayment = async (req, res, next) => {
+  try {
+    const { orderId, paymentId, signature, amount } = req.body;
+
+    if (!orderId || !paymentId || !signature) {
+      return next(new ApiError('orderId, paymentId, and signature are required.', 400));
+    }
+
+    const isValid = verifyPaymentSignature({
+      orderId,
+      paymentId,
+      signature
+    });
+
+    if (!isValid) {
+      return next(new ApiError('Invalid payment verification signature.', 400));
+    }
+
+    // Check if this payment was already credited (Idempotency)
+    const existing = await TopUp.findOne({ gatewayReference: paymentId });
+    if (existing && existing.status === 'verified') {
+      return res.json({ success: true, message: 'Payment already verified', data: existing });
+    }
+
+    const amountPaise = Math.round(Number(amount));
+    if (!amountPaise || amountPaise < 10000) {
+      return next(new ApiError('Invalid payment amount.', 400));
+    }
+
+    const topUp = await TopUp.create({
+      user: req.user._id,
+      amount: amountPaise,
+      status: 'verified',
+      gatewayReference: paymentId,
+      paymentMethod: 'gateway_sdk',
+      verifiedAt: new Date()
+    });
+
+    // Credit ledger
+    await recordLedgerEntry(
+      req.user._id,
+      amountPaise,
+      'credit',
+      `Wallet top-up via Payment Gateway (${paymentId})`,
+      topUp._id,
+      'TopUp'
+    );
+
+    // Audit log
+    await logAuditEvent({
+      adminUser: null,
+      action: 'PAYMENT_SIGNATURE_VERIFIED',
+      targetModel: 'TopUp',
+      targetId: topUp._id,
+      changes: { status: 'verified', paymentId, amount: amountPaise },
+      reason: 'Client-side gateway signature verified',
+      req
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment verified and wallet credited successfully.',
+      data: topUp
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   purchasePlan,
   getSubscriptions,
-  collectEarnings
+  collectEarnings,
+  handleWebhook,
+  verifyPayment
 };

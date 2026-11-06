@@ -44,7 +44,6 @@ const playAviator = async (req, res, next) => {
       success: true, 
       data: {
         betId: bet._id,
-        crashPoint: crashPoint,
         demoBalance: user.demoBalance
       }
     });

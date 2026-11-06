@@ -17,6 +17,7 @@ const rawPaymentSetting = require('./PaymentSetting');
 const rawReferralReward = require('./ReferralReward');
 const rawReferralSetting = require('./ReferralSetting');
 const rawNotification = require('./Notification');
+const rawIdempotencyKey = require('./IdempotencyKey');
 
 const User = createTenantModel('User', rawUser.schema);
 const Plan = createTenantModel('Plan', rawPlan.schema);
@@ -35,6 +36,7 @@ const PaymentSetting = createTenantModel('PaymentSetting', rawPaymentSetting.sch
 const ReferralReward = createTenantModel('ReferralReward', rawReferralReward.schema);
 const ReferralSetting = createTenantModel('ReferralSetting', rawReferralSetting.schema);
 const Notification = createTenantModel('Notification', rawNotification.schema);
+const IdempotencyKey = createTenantModel('IdempotencyKey', rawIdempotencyKey.schema);
 
 module.exports = {
   User,
@@ -53,5 +55,6 @@ module.exports = {
   PaymentSetting,
   ReferralReward,
   ReferralSetting,
-  Notification
+  Notification,
+  IdempotencyKey
 };

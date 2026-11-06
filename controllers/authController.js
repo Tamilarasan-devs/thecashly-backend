@@ -7,8 +7,11 @@ const { generateUniqueReferralCode } = require('../utils/referral');
 const REFERRAL_BONUS_REFERRER = 10000; // ₹100.00 in paise
 const REFERRAL_BONUS_REFEREE = 10000;  // ₹100.00 in paise (100 rupees welcome bonus)
 
-const generateToken = (id) => {
-  return jwt.sign({ id: id.toString() }, process.env.JWT_SECRET || 'fallback_secret_for_dev', {
+const generateToken = (id, tenant = 'thecashly') => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('FATAL: JWT_SECRET environment variable is not defined.');
+  }
+  return jwt.sign({ id: id.toString(), tenant }, process.env.JWT_SECRET, {
     expiresIn: '7d',
   });
 };
@@ -74,7 +77,8 @@ const registerUser = async (req, res, next) => {
         role: user.role,
         referralCode: user.referralCode,
         walletBalance: user.walletBalance,
-        token: generateToken(user._id)
+        tenant: req.tenant || 'thecashly',
+        token: generateToken(user._id, req.tenant || 'thecashly')
       }
     });
   } catch (error) {
@@ -118,12 +122,13 @@ const loginUser = async (req, res, next) => {
       });
     }
 
-    // Cross-tenant fallback: in case the user registered in the primary/default database
+    let userTenant = req.tenant || 'thecashly';
+
+    // Cross-tenant fallback: in case the user registered in the other database
     if (!user) {
       const { connections } = require('../config/dbManager');
-      const otherConn = connections.earnbuddy && connections.thecashly 
-        ? (req.tenant === 'earnbuddy' ? connections.thecashly : connections.earnbuddy)
-        : null;
+      const otherTenant = (req.tenant === 'earnbuddy') ? 'thecashly' : 'earnbuddy';
+      const otherConn = connections[otherTenant];
       if (otherConn) {
         const rawUserModel = otherConn.models['User'] || otherConn.model('User', User.schema);
         if (cleanPhone.length === 10) {
@@ -135,6 +140,9 @@ const loginUser = async (req, res, next) => {
           user = await rawUserModel.findOne({
             $or: [{ phone: rawIdentifier }, { phone: cleanPhone }]
           });
+        }
+        if (user) {
+          userTenant = otherTenant;
         }
       }
     }
@@ -167,7 +175,8 @@ const loginUser = async (req, res, next) => {
         role: user.role,
         referralCode: user.referralCode,
         walletBalance: user.walletBalance,
-        token: generateToken(user._id)
+        tenant: userTenant,
+        token: generateToken(user._id, userTenant)
       }
     });
   } catch (error) {

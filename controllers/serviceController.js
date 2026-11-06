@@ -6,12 +6,34 @@ const { ApiError } = require('../middleware/errorHandler');
 // @access  Private
 const getTransactionHistory = async (req, res, next) => {
   try {
-    const history = await WalletLedgerEntry.find({ user: req.user._id })
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const filter = { user: req.user._id };
+    if (req.query.balanceType) filter.balanceType = req.query.balanceType;
+    if (req.query.type) filter.type = req.query.type;
+
+    const total = await WalletLedgerEntry.countDocuments(filter);
+    const history = await WalletLedgerEntry.find(filter)
       .populate('referenceId')
       .sort('-createdAt')
-      .limit(100)
+      .skip(skip)
+      .limit(limit)
       .lean();
-    res.json({ success: true, data: history });
+
+    res.json({
+      success: true,
+      data: history,
+      pagination: {
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+        limit,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
     next(error);
   }

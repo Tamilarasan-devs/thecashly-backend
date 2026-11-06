@@ -10,4 +10,8 @@ const auditLogSchema = new mongoose.Schema({
   ipAddress: { type: String },
 }, { timestamps: true });
 
+auditLogSchema.index({ targetModel: 1, targetId: 1, createdAt: -1 });
+auditLogSchema.index({ action: 1, createdAt: -1 });
+auditLogSchema.index({ adminUser: 1, createdAt: -1 });
+
 module.exports = mongoose.model('AuditLog', auditLogSchema);

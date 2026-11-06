@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { initTopUp, verifySandboxTopUp, getUserTopUps, submitManualTopUp } = require('../controllers/topUpController');
+const { initTopUp, getUserTopUps, submitManualTopUp } = require('../controllers/topUpController');
 const { protect } = require('../middleware/auth');
+const { idempotencyMiddleware } = require('../services/idempotency');
 
-router.post('/init', protect, initTopUp);
-router.post('/submit-manual', protect, submitManualTopUp);
-router.post('/verify-sandbox', verifySandboxTopUp);
+router.post('/init', protect, idempotencyMiddleware(), initTopUp);
+router.post('/submit-manual', protect, idempotencyMiddleware(), submitManualTopUp);
 router.get('/', protect, getUserTopUps);
 
 module.exports = router;

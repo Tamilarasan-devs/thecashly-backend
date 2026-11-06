@@ -1,6 +1,7 @@
 const { TopUp, Notification } = require('../models');
 const { ApiError } = require('../middleware/errorHandler');
 const { recordLedgerEntry } = require('../services/ledger');
+const { logAuditEvent } = require('../services/auditLogger');
 const { triggerReferralCheckOnDeposit } = require('./referralAdminController');
 
 // @desc    Initialize a top-up
@@ -38,59 +39,6 @@ const initTopUp = async (req, res, next) => {
   }
 };
 
-// @desc    Simulate sandbox top-up verification
-// @route   POST /api/topups/verify-sandbox
-// @access  Public
-const verifySandboxTopUp = async (req, res, next) => {
-  try {
-    const { topUpId, status, gatewayReference } = req.body;
-    
-    // NOTE: IN PRODUCTION, this endpoint must verify webhook signatures
-    // or call the provider (Stripe, Razorpay) directly to confirm status!
-    
-    const topUp = await TopUp.findById(topUpId);
-    if (!topUp) {
-      return next(new ApiError('Top-up not found', 404));
-    }
-
-    if (topUp.status === 'verified') {
-      return res.json({ success: true, message: 'Top-up already verified', data: topUp });
-    }
-
-    if (status === 'success') {
-      topUp.status = 'verified';
-      topUp.gatewayReference = gatewayReference || `MOCK_${Date.now()}`;
-      topUp.verifiedAt = new Date();
-      await topUp.save();
-
-      // Credit wallet idempotently using ledger
-      await recordLedgerEntry(
-        topUp.user,
-        topUp.amount,
-        'credit',
-        'Wallet top-up via Sandbox Gateway',
-        topUp._id,
-        'TopUp'
-      );
-
-      // Audit and notify referral workflow if user was referred
-      try {
-        await triggerReferralCheckOnDeposit(topUp);
-      } catch (refErr) {
-        console.error('[TopUp] Error checking referral reward:', refErr);
-      }
-      
-      res.json({ success: true, message: 'Top-up successful', data: topUp });
-    } else {
-      topUp.status = 'failed';
-      await topUp.save();
-      res.json({ success: true, message: 'Top-up failed' });
-    }
-  } catch (error) {
-    next(error);
-  }
-};
-
 // @desc    Submit manual UPI top-up with UTR
 // @route   POST /api/topups/submit-manual
 // @access  Private
@@ -105,18 +53,17 @@ const submitManualTopUp = async (req, res, next) => {
       return next(new ApiError('Maximum deposit is ₹100,000', 400));
     }
 
-    const cleanUtr = String(utr || '').trim();
-    if (!cleanUtr || cleanUtr.length < 6) {
+    const cleanUtr = String(utr || '').replace(/[\s-]/g, '').trim().toUpperCase();
+    if (!cleanUtr || cleanUtr.length < 6 || cleanUtr.length > 30) {
       return next(new ApiError('Please enter a valid 12-digit UTR / Reference number', 400));
     }
 
-    // Check if this UTR has already been submitted
+    // Check if this UTR has already been submitted in any state
     const existing = await TopUp.findOne({
       $or: [
         { utr: cleanUtr },
         { gatewayReference: cleanUtr }
-      ],
-      status: { $in: ['pending', 'verified'] }
+      ]
     });
 
     if (existing) {
@@ -138,6 +85,9 @@ const submitManualTopUp = async (req, res, next) => {
       data: topUp
     });
   } catch (error) {
+    if (error.code === 11000 || error.message?.includes('duplicate key') || error.message?.includes('E11000')) {
+      return next(new ApiError('This UTR / Reference number has already been submitted.', 400));
+    }
     next(error);
   }
 };
@@ -147,8 +97,32 @@ const submitManualTopUp = async (req, res, next) => {
 // @access  Private
 const getUserTopUps = async (req, res, next) => {
   try {
-    const topUps = await TopUp.find({ user: req.user._id }).sort('-createdAt').limit(100).lean();
-    res.json({ success: true, data: topUps });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const filter = { user: req.user._id };
+    if (req.query.status) filter.status = req.query.status;
+
+    const total = await TopUp.countDocuments(filter);
+    const topUps = await TopUp.find(filter)
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    res.json({
+      success: true,
+      data: topUps,
+      pagination: {
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+        limit,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -159,13 +133,41 @@ const getUserTopUps = async (req, res, next) => {
 // @access  Private/Admin
 const getAllTopUps = async (req, res, next) => {
   try {
-    const topUps = await TopUp.find({})
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.search) {
+      const searchRegex = new RegExp(String(req.query.search).trim(), 'i');
+      filter.$or = [
+        { utr: searchRegex },
+        { gatewayReference: searchRegex }
+      ];
+    }
+
+    const total = await TopUp.countDocuments(filter);
+    const topUps = await TopUp.find(filter)
       .populate('user', 'name email phone')
       .populate('reviewedBy', 'name email')
       .sort('-createdAt')
-      .limit(200)
+      .skip(skip)
+      .limit(limit)
       .lean();
-    res.json({ success: true, data: topUps });
+
+    res.json({
+      success: true,
+      data: topUps,
+      pagination: {
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+        limit,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -222,6 +224,17 @@ const approveTopUp = async (req, res, next) => {
       console.error('[Notification] Failed to create deposit notification:', notifErr.message);
     }
 
+    // Audit log
+    await logAuditEvent({
+      adminUser: req.user._id,
+      action: 'TOPUP_APPROVED',
+      targetModel: 'TopUp',
+      targetId: topUp._id,
+      changes: { status: 'verified', amount: topUp.amount, utr: topUp.utr },
+      reason: 'Admin verified deposit',
+      req
+    });
+
     res.json({
       success: true,
       message: 'Top-up approved and user wallet credited successfully.',
@@ -252,6 +265,17 @@ const rejectTopUp = async (req, res, next) => {
     topUp.reviewedAt = new Date();
     await topUp.save();
 
+    // Audit log
+    await logAuditEvent({
+      adminUser: req.user._id,
+      action: 'TOPUP_REJECTED',
+      targetModel: 'TopUp',
+      targetId: topUp._id,
+      changes: { status: 'failed', rejectionReason: topUp.rejectionReason },
+      reason: topUp.rejectionReason,
+      req
+    });
+
     res.json({
       success: true,
       message: 'Top-up request rejected.',
@@ -264,7 +288,6 @@ const rejectTopUp = async (req, res, next) => {
 
 module.exports = {
   initTopUp,
-  verifySandboxTopUp,
   submitManualTopUp,
   getUserTopUps,
   getAllTopUps,
