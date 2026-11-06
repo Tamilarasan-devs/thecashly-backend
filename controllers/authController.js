@@ -15,26 +15,28 @@ const generateToken = (id) => {
 
 const registerUser = async (req, res, next) => {
   try {
-    const { name, email, password, referralCode, referral, ref } = req.body;
+    const { name, phone, email, password, referralCode, referral, ref } = req.body;
     
     if (!name || !name.trim()) {
       return next(new ApiError('Please enter your full name.', 400, 'name'));
     }
-    if (!email || !email.trim()) {
-      return next(new ApiError('Please enter your email address.', 400, 'email'));
+
+    const rawPhone = (phone || req.body.mobile || req.body.mobileNumber || '').toString().trim();
+    if (!rawPhone) {
+      return next(new ApiError('Please enter your 10-digit phone number.', 400, 'phone'));
     }
+    const cleanPhone = rawPhone.replace(/\D/g, '').slice(-10);
+    if (cleanPhone.length !== 10) {
+      return next(new ApiError('Please enter a valid 10-digit phone number.', 400, 'phone'));
+    }
+
     if (!password) {
       return next(new ApiError('Please create a password.', 400, 'password'));
     }
     
-    const cleanEmail = email.trim();
-    const escapedEmail = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const userExists = await User.findOne({ 
-      email: { $regex: new RegExp(`^${escapedEmail}$`, 'i') } 
-    });
-    
+    const userExists = await User.findOne({ phone: cleanPhone });
     if (userExists) {
-      return next(new ApiError('An account with this email address already exists. Please sign in instead.', 400, 'email'));
+      return next(new ApiError('An account with this phone number already exists. Please sign in instead.', 400, 'phone'));
     }
 
     // Check referral code if provided
@@ -54,7 +56,8 @@ const registerUser = async (req, res, next) => {
 
     const user = await User.create({
       name: name.trim(),
-      email: cleanEmail.toLowerCase(),
+      phone: cleanPhone,
+      email: email ? email.trim().toLowerCase() : undefined,
       passwordHash,
       referralCode: newReferralCode,
       referredBy: referrer ? referrer._id : null,
@@ -66,6 +69,7 @@ const registerUser = async (req, res, next) => {
       data: {
         _id: user._id,
         name: user.name,
+        phone: user.phone,
         email: user.email,
         role: user.role,
         referralCode: user.referralCode,
@@ -80,34 +84,42 @@ const registerUser = async (req, res, next) => {
 
 const loginUser = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { phone, email, password } = req.body;
+    const rawIdentifier = (phone || req.body.mobile || req.body.mobileNumber || email || '').toString().trim();
     
-    if (!email && !password) {
-      return next(new ApiError('Please enter your email and password.', 400, 'all'));
+    if (!rawIdentifier && !password) {
+      return next(new ApiError('Please enter your phone number and password.', 400, 'all'));
     }
-    if (!email || !email.trim()) {
-      return next(new ApiError('Please enter your email address.', 400, 'email'));
+    if (!rawIdentifier) {
+      return next(new ApiError('Please enter your phone number.', 400, 'phone'));
     }
     if (!password) {
       return next(new ApiError('Please enter your password.', 400, 'password'));
     }
     
-    const cleanEmail = email.trim();
-    const lowerEmail = cleanEmail.toLowerCase();
+    // Normalize phone number (strip non-digits, keep last 10 digits)
+    const cleanPhone = rawIdentifier.replace(/\D/g, '').slice(-10);
     
-    // Direct index match on lowercase email for <1ms query
-    let user = await User.findOne({ email: lowerEmail });
+    let user = null;
+    if (cleanPhone.length === 10) {
+      user = await User.findOne({ phone: cleanPhone });
+    }
     
-    if (!user) {
-      // Fallback to case-insensitive regex for legacy accounts
-      const escapedEmail = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Fallback: in case an existing user logs in with an email or legacy phone formatting
+    if (!user && rawIdentifier.includes('@')) {
+      const lowerEmail = rawIdentifier.toLowerCase();
+      user = await User.findOne({ email: lowerEmail });
+    } else if (!user) {
       user = await User.findOne({ 
-        email: { $regex: new RegExp(`^${escapedEmail}$`, 'i') } 
+        $or: [
+          { phone: rawIdentifier },
+          { phone: cleanPhone }
+        ]
       });
     }
     
     if (!user) {
-      return next(new ApiError('No account found with this email address. Please check your email or create an account.', 401, 'email'));
+      return next(new ApiError('No account found with this phone number. Please check your number or create an account.', 401, 'phone'));
     }
     
     const isMatch = await bcrypt.compare(password, user.passwordHash);
@@ -129,6 +141,7 @@ const loginUser = async (req, res, next) => {
       data: {
         _id: user._id,
         name: user.name,
+        phone: user.phone,
         email: user.email,
         role: user.role,
         referralCode: user.referralCode,
@@ -194,7 +207,7 @@ const getReferralStats = async (req, res, next) => {
     }
 
     const referrals = await User.find({ referredBy: userId })
-      .select('name email createdAt')
+      .select('name phone email createdAt')
       .sort('-createdAt');
 
     const { ReferralReward, ReferralSetting, TopUp } = require('../models');
@@ -228,12 +241,10 @@ const getReferralStats = async (req, res, next) => {
     });
 
     const formattedReferrals = referrals.map(r => {
-      const emailParts = (r.email || '').split('@');
-      const prefix = emailParts[0] || '';
-      const domain = emailParts[1] || '';
-      const obscuredEmail = prefix.length > 2 
-        ? `${prefix.slice(0, 2)}***@${domain}` 
-        : `*@${domain}`;
+      const userPhone = r.phone || '';
+      const obscuredPhone = userPhone.length >= 10 
+        ? `${userPhone.slice(0, 2)}******${userPhone.slice(-2)}` 
+        : userPhone || 'Verified User';
 
       const rewardInfo = rewardsMap.get(String(r._id));
       const hasDeposited = Boolean(rewardInfo);
@@ -254,7 +265,8 @@ const getReferralStats = async (req, res, next) => {
       return {
         _id: r._id,
         name: r.name,
-        email: obscuredEmail,
+        phone: obscuredPhone,
+        email: obscuredPhone, // For backward compatibility with any frontends expecting identifier
         createdAt: r.createdAt,
         hasDeposited,
         isRewardPaid,
@@ -289,6 +301,18 @@ const updateProfile = async (req, res, next) => {
     }
     
     if (req.body.name) user.name = req.body.name.trim();
+    if (req.body.phone || req.body.mobile || req.body.mobileNumber) {
+      const rawP = (req.body.phone || req.body.mobile || req.body.mobileNumber).toString().trim();
+      const cleanP = rawP.replace(/\D/g, '').slice(-10);
+      if (cleanP.length !== 10) {
+        return next(new ApiError('Please enter a valid 10-digit phone number', 400));
+      }
+      const existing = await User.findOne({ phone: cleanP, _id: { $ne: user._id } });
+      if (existing) {
+        return next(new ApiError('Phone number is already registered to another account', 400));
+      }
+      user.phone = cleanP;
+    }
     if (req.body.email) {
       const email = req.body.email.trim().toLowerCase();
       const existing = await User.findOne({ email, _id: { $ne: user._id } });

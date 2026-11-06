@@ -50,7 +50,7 @@ router.get('/users', protect, authorize('admin'), async (req, res, next) => {
   try {
     const users = await User.find({})
       .select('-passwordHash')
-      .populate('referredBy', 'name email referralCode')
+      .populate('referredBy', 'name phone email referralCode')
       .sort('-createdAt');
     res.json({ success: true, data: users });
   } catch (err) {
@@ -61,7 +61,7 @@ router.get('/users', protect, authorize('admin'), async (req, res, next) => {
 // Admin: Get all tickets
 router.get('/tickets', protect, authorize('admin'), async (req, res, next) => {
   try {
-    const tickets = await SupportTicket.find({}).populate('user', 'name email').sort('-createdAt');
+    const tickets = await SupportTicket.find({}).populate('user', 'name phone email').sort('-createdAt');
     res.json({ success: true, data: tickets });
   } catch (err) {
     next(err);

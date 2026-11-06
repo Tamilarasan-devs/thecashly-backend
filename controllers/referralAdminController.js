@@ -64,9 +64,9 @@ const getAdminReferralRewards = async (req, res, next) => {
   try {
     const rewards = await ReferralReward.find({})
       .populate('referrer', 'name email referralCode walletBalance')
-      .populate('referredUser', 'name email referralCode walletBalance')
+      .populate('referredUser', 'name phone email referralCode walletBalance')
       .populate('topUp', 'amount utr paymentMethod createdAt status')
-      .populate('reviewedBy', 'name email')
+      .populate('reviewedBy', 'name phone email')
       .sort('-createdAt')
       .lean();
 
@@ -106,8 +106,8 @@ const sendReferrerReward = async (req, res, next) => {
     }
 
     const reward = await ReferralReward.findById(req.params.id)
-      .populate('referrer', 'name email')
-      .populate('referredUser', 'name email')
+      .populate('referrer', 'name phone email')
+      .populate('referredUser', 'name phone email')
       .populate('topUp', 'amount');
 
     if (!reward) {
@@ -200,8 +200,8 @@ const sendReferredUserReward = async (req, res, next) => {
     }
 
     const reward = await ReferralReward.findById(req.params.id)
-      .populate('referrer', 'name email')
-      .populate('referredUser', 'name email')
+      .populate('referrer', 'name phone email')
+      .populate('referredUser', 'name phone email')
       .populate('topUp', 'amount');
 
     if (!reward) {
@@ -272,8 +272,8 @@ const approveBothReferralRewards = async (req, res, next) => {
     const { referrerAmount, refereeAmount, note } = req.body;
 
     const reward = await ReferralReward.findById(req.params.id)
-      .populate('referrer', 'name email')
-      .populate('referredUser', 'name email');
+      .populate('referrer', 'name phone email')
+      .populate('referredUser', 'name phone email');
 
     if (!reward) {
       return next(new ApiError('Referral reward record not found', 404));

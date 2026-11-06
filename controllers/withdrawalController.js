@@ -66,7 +66,7 @@ const getUserWithdrawals = async (req, res, next) => {
 const getAllWithdrawals = async (req, res, next) => {
   try {
     const withdrawals = await Withdrawal.find({})
-      .populate('user', 'name email')
+      .populate('user', 'name phone email')
       .sort('-createdAt')
       .limit(200)
       .lean();
@@ -183,7 +183,7 @@ const createManualWithdrawalStatement = async (req, res, next) => {
       console.warn('Ledger entry note on manual statement:', ledgerErr.message);
     }
 
-    const populatedWithdrawal = await Withdrawal.findById(withdrawal._id).populate('user', 'name email');
+    const populatedWithdrawal = await Withdrawal.findById(withdrawal._id).populate('user', 'name phone email');
 
     res.status(201).json({
       success: true,
@@ -201,7 +201,7 @@ const createManualWithdrawalStatement = async (req, res, next) => {
 const getManualWithdrawalStatements = async (req, res, next) => {
   try {
     const list = await Withdrawal.find({ isManualStatement: true })
-      .populate('user', 'name email payoutDetails')
+      .populate('user', 'name phone email payoutDetails')
       .sort('-createdAt')
       .limit(200)
       .lean();
