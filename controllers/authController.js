@@ -122,30 +122,10 @@ const loginUser = async (req, res, next) => {
       });
     }
 
-    let userTenant = req.tenant || 'thecashly';
-
-    // Cross-tenant fallback: in case the user registered in the other database
-    if (!user) {
-      const { connections } = require('../config/dbManager');
-      const otherTenant = (req.tenant === 'earnbuddy') ? 'thecashly' : 'earnbuddy';
-      const otherConn = connections[otherTenant];
-      if (otherConn) {
-        const rawUserModel = otherConn.models['User'] || otherConn.model('User', User.schema);
-        if (cleanPhone.length === 10) {
-          user = await rawUserModel.findOne({ phone: cleanPhone });
-        }
-        if (!user && rawIdentifier.includes('@')) {
-          user = await rawUserModel.findOne({ email: rawIdentifier.toLowerCase() });
-        } else if (!user) {
-          user = await rawUserModel.findOne({
-            $or: [{ phone: rawIdentifier }, { phone: cleanPhone }]
-          });
-        }
-        if (user) {
-          userTenant = otherTenant;
-        }
-      }
-    }
+    // Strict Tenant Isolation: Never leak users or admins across separate tenant databases!
+    // If a request is made to the EarnBuddy endpoint/domain, it must ONLY look in the EarnBuddy DB.
+    // Cross-tenant fallback is completely removed to prevent unauthorized access across platforms.
+    const userTenant = req.tenant || 'thecashly';
     
     if (!user) {
       return next(new ApiError('No account found with this phone number. Please check your number or create an account.', 401, 'phone'));
