@@ -24,6 +24,7 @@ const allowedOrigins = [
   'https://www.thecashly.in',
   'https://earnbuddy.in',
   'https://www.earnbuddy.in',
+  'https://earnbuddy-frontend-taupe.vercel.app',
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/
 ];
