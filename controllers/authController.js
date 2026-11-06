@@ -117,6 +117,27 @@ const loginUser = async (req, res, next) => {
         ]
       });
     }
+
+    // Cross-tenant fallback: in case the user registered in the primary/default database
+    if (!user) {
+      const { connections } = require('../config/dbManager');
+      const otherConn = connections.earnbuddy && connections.thecashly 
+        ? (req.tenant === 'earnbuddy' ? connections.thecashly : connections.earnbuddy)
+        : null;
+      if (otherConn) {
+        const rawUserModel = otherConn.models['User'] || otherConn.model('User', User.schema);
+        if (cleanPhone.length === 10) {
+          user = await rawUserModel.findOne({ phone: cleanPhone });
+        }
+        if (!user && rawIdentifier.includes('@')) {
+          user = await rawUserModel.findOne({ email: rawIdentifier.toLowerCase() });
+        } else if (!user) {
+          user = await rawUserModel.findOne({
+            $or: [{ phone: rawIdentifier }, { phone: cleanPhone }]
+          });
+        }
+      }
+    }
     
     if (!user) {
       return next(new ApiError('No account found with this phone number. Please check your number or create an account.', 401, 'phone'));
