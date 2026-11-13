@@ -1,8 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const { connections } = require('../config/dbManager');
 
 // Mount all feature sub-routers for EarnBuddy
-router.get('/health', (req, res) => res.json({ status: 'ok', service: 'EarnBuddy API', timestamp: new Date() }));
+router.get('/health', (req, res) => res.json({ 
+  status: 'ok', 
+  service: 'EarnBuddy API', 
+  tenant: req.tenant,
+  hasEarnBuddyDb: !!connections.earnbuddy,
+  earnbuddyDbName: connections.earnbuddy?.name,
+  timestamp: new Date() 
+}));
 router.use('/auth', require('./auth'));
 router.use('/plans', require('./plans'));
 router.use('/payments', require('./payments'));
