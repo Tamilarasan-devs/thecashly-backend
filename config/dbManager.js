@@ -35,6 +35,12 @@ const initDatabases = async () => {
       }
     }
 
+    // Default fallback URI for EarnBuddy if omitted in deployment environment variables
+    if (!earnbuddyUri) {
+      earnbuddyUri = 'mongodb+srv://monishantech_db_user:QlTwsbDWH6G2UwRP@cluster0.wekiyuj.mongodb.net/earnbuddy?retryWrites=true&w=majority';
+      console.log('[DB] EARNBUDDY_MONGO_URI was not set in process.env; using default EarnBuddy cluster URI.');
+    }
+
     // Connect primary (TheCashly)
     console.log('[DB] Connecting to TheCashly database...');
     connections.thecashly = await createConnectionWithPool(thecashlyUri, 'thecashly');
